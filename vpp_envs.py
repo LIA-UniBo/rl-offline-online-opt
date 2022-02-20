@@ -645,16 +645,20 @@ class SingleStepFullRLVPP(VPPEnv):
             grid_out = tilde_cons - self.p_ren_pv_real[i] - storage_out[i] - diesel_power[i] + storage_in[i] + grid_in[
                 i]
 
-            # Compute the cost
-            obf = (self.c_grid[i] * grid_out + self.c_diesel * diesel_power[i] - self.c_grid[i] * grid_in[i])
-            cost -= obf
-
             # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
             # feasible
             if storage_in[i] > self.cap_max - cap_x or storage_out[i] > cap_x or grid_out < 0:
-                feasible = False
-                cost = MIN_REWARD
-                break
+                unf_act = (storage_in[i], storage_out[i], grid_in[i], diesel_power[i])
+                feasible_action = self._find_feasible(i, unf_act, cap_x)
+                storage_in[i] = feasible_action[0]
+                storage_out[i] = feasible_action[1]
+                grid_in[i] = feasible_action[2]
+                diesel_power[i] = feasible_action[3]
+                grid_out = tilde_cons - self.p_ren_pv_real[i] - storage_out[i] - diesel_power[i] + storage_in[i] + grid_in[i]
+
+            # Compute the cost
+            obf = (self.c_grid[i] * grid_out + self.c_diesel * diesel_power[i] - self.c_grid[i] * grid_in[i])
+            cost -= obf
 
             # Update the storage capacitance
             old_cap_x = cap_x
@@ -674,6 +678,51 @@ class SingleStepFullRLVPP(VPPEnv):
             assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
         return feasible, cost
+
+    def _find_feasible(self, i, action, cap_x, eps=0.5):
+        """
+        Find a feasible action using safety layer.
+        :param action: numpy.array of shape (4, ); the decision variables for each timestep
+        :param eps: float, epsilon used to limit ranges (in both direction) for numerical stability
+        :return: numpy.array of shape (4, ); closest feasible action
+        """
+        # unpack action
+        storage_in, storage_out, grid_in, diesel_power = action
+
+        tilde_cons = self.shift[i] + self.tot_cons_real[i]
+        tilde_ren = self.p_ren_pv_real[i]
+
+        # create optimization model, make variables and set constraints
+        mod = Model()
+
+        storage_in_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=min(self.cap_max - cap_x, 200) - eps,
+                                    name="storage_in_hat")
+        storage_out_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=min(cap_x, 200) - eps,
+                                     name="storage_out_hat")
+        grid_in_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=600 - eps,
+                                 name="grid_in_hat")
+        diesel_power_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=self.p_diesel_max - eps,
+                                      name="diesel_power_hat")
+        grid_out = mod.addVar(vtype=GRB.CONTINUOUS, name="grid_out")
+
+        pwr_bal = (grid_out == (tilde_cons - tilde_ren - storage_out_hat - diesel_power_hat + storage_in_hat + grid_in_hat))
+        mod.addConstr(pwr_bal, "power_balance")
+        mod.addConstr(grid_out >= eps)
+
+        # objective function
+        obf = (((storage_in - storage_in_hat) ** 2) + ((storage_out - storage_out_hat) ** 2) +
+               ((grid_in - grid_in_hat) ** 2) + ((diesel_power - diesel_power_hat) ** 2))
+        mod.setObjective(obf)
+
+        # get closest feasible action
+        feasible = solve(mod)
+        assert feasible
+        closest = np.array([mod.getVarByName(var).X
+                            for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
+                           dtype=np.float64)
+        closest[np.abs(closest) < 1e-10] = 0  # numerical instability
+        assert not mod.getVarByName('grid_out').X < 0
+        return closest
 
     def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
