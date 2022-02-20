@@ -369,8 +369,8 @@ if __name__ == '__main__':
         for instance_idx in indexes:
             tf.compat.v1.disable_eager_execution()
             tf.compat.v1.reset_default_graph()
-            run = my_wrap_experiment(train_rl_algo,
-                                     logging_dir=LOG_DIR)
+            run = my_wrap_experiment(train_rl_algo, archive_launch_repo=False,
+                                     logging_dir=os.path.join(LOG_DIR, f'train_{instance_idx}'))
 
             run(method=METHOD,
                 test_split=[instance_idx],
@@ -381,7 +381,7 @@ if __name__ == '__main__':
     elif mode == 'test':
         # Test trained methods
         for idx in indexes:
-            test_rl_algo(log_dir=LOG_DIR,
+            test_rl_algo(log_dir=os.path.join(LOG_DIR, f'test_{idx}'),
                          predictions_filepath=os.path.join('data', 'Dataset10k.csv'),
                          shifts_filepath=os.path.join('data', 'optShift.npy'),
                          prices_filepath=os.path.join('data', 'gmePrices.npy'),
