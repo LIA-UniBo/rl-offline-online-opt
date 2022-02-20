@@ -102,7 +102,7 @@ class VPPEnv(Env):
         noise = np.random.normal(0, self.noise_std_dev, self.n)
         self.tot_cons_real = self.tot_cons_pred + self.tot_cons_pred * noise
 
-    def step(self, action):
+    def step(self, action: np.array):
         """
         Step function of the Gym environment.
         :param action: numpy.array; agent's action.
@@ -110,7 +110,7 @@ class VPPEnv(Env):
         """
         raise NotImplementedError()
 
-    def reset(self):
+    def reset(self) -> np.array:
         """
         When we reset the environment we randomly choose another instance and we clear all the instance variables.
         :return: numpy.array; pv and load values for the current instance.
@@ -123,7 +123,7 @@ class VPPEnv(Env):
         self._create_instance_variables()
         return self._get_observations()
 
-    def render(self, mode='ascii'):
+    def render(self, mode: str = 'ascii'):
         """
         Simple rendering of the environment.
         :return:
@@ -184,7 +184,7 @@ class SingleStepVPPEnv(VPPEnv):
     def max_episode_length(self):
         return 1
 
-    def _get_observations(self):
+    def _get_observations(self) -> np.array:
         """
         Return predicted pv and load values as a single array.
         :return: numpy.array; pv and load values for the current instance.
@@ -212,7 +212,8 @@ class SingleStepVPPEnv(VPPEnv):
         """
         Solve the optimization model with the greedy heuristic.
         :param c_virt: numpy.array of shape (num_timesteps, ); the virtual costs multiplied to output storage variable.
-        :return: list of gurobipy.Model; a list with the solved optimization model.
+        :return: list of gurobipy.Model, bool; a list with the solved optimization model and True if the problem is
+                                               feasible, False otherwise.
         """
 
         # Check variables initialization
@@ -285,7 +286,7 @@ class SingleStepVPPEnv(VPPEnv):
 
         return models, feasible
 
-    def _compute_real_cost(self, models):
+    def _compute_real_cost(self, models: List[gurobipy.Model]) -> Union[float, int]:
         """
         Given a list of optimization models, one for each timestep, the method returns the real cost value.
         :param models: list of gurobipy.Model; a list with an optimization model for each timestep.
@@ -310,7 +311,7 @@ class SingleStepVPPEnv(VPPEnv):
 
         return cost
 
-    def step(self, action):
+    def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
         This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
         (the reward) is computed.
@@ -334,6 +335,7 @@ class SingleStepVPPEnv(VPPEnv):
         observations = self._get_observations()
 
         return observations, reward, done, {}
+
 
 ########################################################################################################################
 
@@ -393,7 +395,7 @@ class MarkovianVPPEnv(VPPEnv):
         # Set the cumulative cost
         self.cumulative_cost = 0
 
-    def _get_observations(self):
+    def _get_observations(self) -> np.array:
         """
         Return predicted pv and load values, one-hot encoding of the timestep and the storage.
         :return: numpy.array; pv and load values for the current instance.
@@ -429,11 +431,12 @@ class MarkovianVPPEnv(VPPEnv):
         self.timestep = 0
         self.cumulative_cost = 0
 
-    def _solve(self, c_virt):
+    def _solve(self, c_virt: np.array) -> List[gurobipy.Model]:
         """
         Solve the optimization model with the greedy heuristic.
         :param c_virt: numpy.array of shape (num_timesteps, ); the virtual costs multiplied to output storage variable.
-        :return: list of gurobipy.Model; a list with the solved optimization model.
+        :return: list of gurobipy.Model, bool; a list with the solved optimization model and True if the model is
+                                               feasible, False otherwise.
         """
 
         # Check variables initialization
@@ -493,7 +496,7 @@ class MarkovianVPPEnv(VPPEnv):
 
         return mod, feasible
 
-    def _compute_real_cost(self, model):
+    def _compute_real_cost(self, model: gurobipy.Model) -> Union[float, int]:
         """
         Given a list of models, one for each timestep, the method returns the real cost value.
         :param model: gurobipy.Model; optimization model for the current timestep.
@@ -512,7 +515,7 @@ class MarkovianVPPEnv(VPPEnv):
 
         return cost
 
-    def step(self, action):
+    def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
         This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
         (the reward) is computed.
@@ -555,6 +558,7 @@ class MarkovianVPPEnv(VPPEnv):
 
         return observations, reward, done, {'feasible': feasible}
 
+
 ########################################################################################################################
 
 
@@ -586,7 +590,7 @@ class SingleStepFullRLVPP(VPPEnv):
 
         # Here we define the observation and action spaces
         self.observation_space = Box(low=0, high=np.inf, shape=(self.n * 2,), dtype=np.float64)
-        self.action_space = Box(low=-1, high=1, shape=(self.n * 4, ), dtype=np.float64)
+        self.action_space = Box(low=0, high=1, shape=(self.n * 4,), dtype=np.float64)
 
     @property
     def max_episode_length(self):
@@ -616,7 +620,7 @@ class SingleStepFullRLVPP(VPPEnv):
         self.tot_cons_real = None
         self.mr = None
 
-    def _solve(self, action):
+    def _solve(self, action: np.array) -> List[gurobipy.Model]:
         """
         Solve the optimization model with the greedy heuristic.
         :param action: numpy.array of shape (num_timesteps, 4); the decision variables for each timestep.
@@ -645,10 +649,10 @@ class SingleStepFullRLVPP(VPPEnv):
         diesel_power = action[self.n*3:]
 
         # Check that decision variables are self.n long
-        assert storage_in.shape == (self.n, )
-        assert storage_out.shape == (self.n, )
-        assert grid_in.shape == (self.n, )
-        assert diesel_power.shape == (self.n, )
+        assert storage_in.shape == (self.n,)
+        assert storage_out.shape == (self.n,)
+        assert grid_in.shape == (self.n,)
+        assert diesel_power.shape == (self.n,)
 
         # Rescale the actions in their feasible ranges
         storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
@@ -674,16 +678,20 @@ class SingleStepFullRLVPP(VPPEnv):
             # Set the power out from the grid so that the power balance constraint is satisfied
             grid_out = tilde_cons - self.p_ren_pv_real[i] - storage_out[i] - diesel_power[i] + storage_in[i] + grid_in[i]
 
-            # Compute the cost
-            obf = (self.c_grid[i] * grid_out + self.c_diesel * diesel_power[i] - self.c_grid[i] * grid_in[i])
-            cost -= obf
-
             # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
             # feasible
             if storage_in[i] > self.cap_max - cap_x or storage_out[i] > cap_x or grid_out < 0:
-                feasible = False
-                cost = MIN_REWARD
-                break
+                unf_act = (storage_in[i], storage_out[i], grid_in[i], diesel_power[i])
+                feasible_action = self._find_feasible(i, unf_act, cap_x)
+                storage_in[i] = feasible_action[0]
+                storage_out[i] = feasible_action[1]
+                grid_in[i] = feasible_action[2]
+                diesel_power[i] = feasible_action[3]
+                grid_out = tilde_cons - self.p_ren_pv_real[i] - storage_out[i] - diesel_power[i] + storage_in[i] + grid_in[i]
+
+            # Compute the cost
+            obf = (self.c_grid[i] * grid_out + self.c_diesel * diesel_power[i] - self.c_grid[i] * grid_in[i])
+            cost -= obf
 
             # Update the storage capacitance
             old_cap_x = cap_x
@@ -704,7 +712,52 @@ class SingleStepFullRLVPP(VPPEnv):
 
         return feasible, cost
 
-    def step(self, action):
+    def _find_feasible(self, i, action, cap_x, eps=0.5):
+        """
+        Find a feasible action using safety layer.
+        :param action: numpy.array of shape (4, ); the decision variables for each timestep
+        :param eps: float, epsilon used to limit ranges (in both direction) for numerical stability
+        :return: numpy.array of shape (4, ); closest feasible action
+        """
+        # unpack action
+        storage_in, storage_out, grid_in, diesel_power = action
+
+        tilde_cons = self.shift[i] + self.tot_cons_real[i]
+        tilde_ren = self.p_ren_pv_real[i]
+
+        # create optimization model, make variables and set constraints
+        mod = Model()
+
+        storage_in_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=min(self.cap_max - cap_x, 200) - eps,
+                                    name="storage_in_hat")
+        storage_out_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=min(cap_x, 200) - eps,
+                                     name="storage_out_hat")
+        grid_in_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=600 - eps,
+                                 name="grid_in_hat")
+        diesel_power_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=self.p_diesel_max - eps,
+                                      name="diesel_power_hat")
+        grid_out = mod.addVar(vtype=GRB.CONTINUOUS, name="grid_out")
+
+        pwr_bal = (grid_out == (tilde_cons - tilde_ren - storage_out_hat - diesel_power_hat + storage_in_hat + grid_in_hat))
+        mod.addConstr(pwr_bal, "power_balance")
+        mod.addConstr(grid_out >= eps)
+
+        # objective function
+        obf = (((storage_in - storage_in_hat) ** 2) + ((storage_out - storage_out_hat) ** 2) +
+               ((grid_in - grid_in_hat) ** 2) + ((diesel_power - diesel_power_hat) ** 2))
+        mod.setObjective(obf)
+
+        # get closest feasible action
+        feasible = solve(mod)
+        assert feasible
+        closest = np.array([mod.getVarByName(var).X
+                            for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
+                           dtype=np.float64)
+        closest[np.abs(closest) < 1e-10] = 0  # numerical instability
+        assert not mod.getVarByName('grid_out').X < 0
+        return closest
+
+    def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
         This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
         (the reward) is computed.
@@ -724,7 +777,8 @@ class SingleStepFullRLVPP(VPPEnv):
         observations = self._get_observations()
 
         return observations, reward, done, {}
-    
+
+
 ########################################################################################################################
 
 
@@ -778,7 +832,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         # Set the cumulative cost
         self.cumulative_cost = 0
 
-    def _get_observations(self):
+    def _get_observations(self) -> np.array:
         """
         Return predicted pv and load values as a single array.
         :return: numpy.array; pv and load values for the current instance.
@@ -787,7 +841,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         observations = np.concatenate((self.p_ren_pv_pred / np.max(self.p_ren_pv_pred),
                                        self.tot_cons_pred / np.max(self.tot_cons_pred)),
                                       axis=0)
-        one_hot_timestep = np.zeros(shape=(self.n, ))
+        one_hot_timestep = np.zeros(shape=(self.n,))
         one_hot_timestep[int(self.timestep)] = 1
         observations = np.concatenate((observations, one_hot_timestep), axis=0)
         observations = np.append(observations, self.storage)
@@ -820,7 +874,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         """
         Solve the optimization model with the greedy heuristic.
         :param action: numpy.array of shape (4, ); the decision variables for each timestep.
-        :return: list of gurobipy.Model; a list with the solved optimization model.
+        :return: bool, float; True if the model is feasible, False otherwise and a list of cost for each timestep.
         """
 
         # Check variables initialization
@@ -860,31 +914,82 @@ class MarkovianRlVPPEnv(VPPEnv):
         cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
 
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
-        # feasible
+        # feasible. Use safety layer to compute closest feasible action
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
-            return False, min(0, self.cap_max - self.storage - storage_in) + min(0, self.storage - storage_out) + min(0, grid_out)
+            feasible_action = self._find_feasible(action)
+            storage_in, storage_out, grid_in, diesel_power = feasible_action
+            grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
+            cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
 
         # Update the storage capacity
         old_cap_x = self.storage
         self.storage = self.storage + storage_in - storage_out
 
         # Check that the constraints are satisfied
-        assert self.storage == old_cap_x + storage_in - storage_out
-        assert 0 <= self.storage <= self.cap_max
-        assert storage_in <= self.cap_max - old_cap_x
-        assert storage_out <= old_cap_x
-        assert 0 <= storage_in <= 200
-        assert 0 <= storage_out <= 200
-        assert 0 <= diesel_power <= self.p_diesel_max
-        assert 0 <= grid_in <= 600
-        assert grid_out >= 0
+        assert self.storage == old_cap_x + storage_in - storage_out, f'{self.storage} == {old_cap_x} + {storage_in} - {storage_out}'
+        assert 0 <= self.storage <= self.cap_max, f'{self.storage}'
+        assert storage_in <= self.cap_max - old_cap_x, f'{storage_in}'
+        assert storage_out <= old_cap_x, f'{storage_out}'
+        assert 0 <= storage_in <= 200, f'{storage_in}'
+        assert 0 <= storage_out <= 200, f'{storage_out}'
+        assert 0 <= diesel_power <= self.p_diesel_max, f'{diesel_power}'
+        assert 0 <= grid_in <= 600, f'{grid_in}'
+        assert grid_out >= 0, f'{grid_out}'
         power_balance = self.p_ren_pv_real[self.timestep] + storage_out + grid_out + diesel_power - storage_in - grid_in
         assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
         return feasible, cost
 
-    # NOTE: here we provide a step-by-step reward rather than 0 expect for the last timestep as done in the paper
-    def step(self, action):
+    def _find_feasible(self, action, eps=0.5):
+        """
+        Find a feasible action using safety layer.
+        :param action: numpy.array of shape (4, ); the decision variables for each timestep
+        :param eps: float, epsilon used to limit ranges (in both direction) for numerical stability
+        :return: numpy.array of shape (4, ); closest feasible action
+        """
+        # unpack action
+        storage_in, storage_out, grid_in, diesel_power = action
+        storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
+        storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
+        grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
+        diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, self.p_diesel_max), value=diesel_power)
+
+        tilde_cons = self.shift[self.timestep] + self.tot_cons_real[self.timestep]
+        tilde_ren = self.p_ren_pv_real[self.timestep]
+
+        # create optimization model, make variables and set constraints
+        mod = Model()
+
+        storage_in_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=min(self.cap_max - self.storage, 200) - eps,
+                                    name="storage_in_hat")
+        storage_out_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=min(self.storage, 200) - eps,
+                                     name="storage_out_hat")
+        grid_in_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=600 - eps,
+                                 name="grid_in_hat")
+        diesel_power_hat = mod.addVar(vtype=GRB.SEMICONT, lb=eps, ub=self.p_diesel_max - eps,
+                                      name="diesel_power_hat")
+        grid_out = mod.addVar(vtype=GRB.CONTINUOUS, name="grid_out")
+
+        pwr_bal = (grid_out == (tilde_cons - tilde_ren - storage_out_hat - diesel_power_hat + storage_in_hat + grid_in_hat))
+        mod.addConstr(pwr_bal, "power_balance")
+        mod.addConstr(grid_out >= eps)
+
+        # objective function
+        obf = (((storage_in - storage_in_hat) ** 2) + ((storage_out - storage_out_hat) ** 2) +
+               ((grid_in - grid_in_hat) ** 2) + ((diesel_power - diesel_power_hat) ** 2))
+        mod.setObjective(obf)
+
+        # get closest feasible action
+        feasible = solve(mod)
+        assert feasible
+        closest = np.array([mod.getVarByName(var).X
+                            for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
+                           dtype=np.float64)
+        closest[np.abs(closest) < 1e-10] = 0 # numerical instability
+        assert not mod.getVarByName('grid_out').X < 0
+        return closest
+
+    def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
         This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
         (the reward) is computed.
@@ -905,10 +1010,10 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         if self.timestep == self.n or not feasible:
             done = True
-            if not feasible:
-                reward = MIN_REWARD
-            else:
+            if self.timestep == self.n:
                 reward = -self.cumulative_cost
+            else:
+                reward = MIN_REWARD
         elif self.timestep < self.n:
             done = False
             reward = 0
@@ -916,6 +1021,3 @@ class MarkovianRlVPPEnv(VPPEnv):
             raise Exception(f"Timestep cannot be greater than {self.n}")
 
         return observations, reward, done, {'feasible': feasible}
-
-
-
