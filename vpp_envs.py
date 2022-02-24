@@ -586,7 +586,7 @@ class SingleStepFullRLVPP(VPPEnv):
         self.tot_cons_real = None
         self.mr = None
 
-    def _solve(self, action: np.array) -> List[gurobipy.Model]:
+    def _solve(self, action: np.array) -> Tuple[bool, Union[int, float], np.array]:
         """
         Solve the optimization model with the greedy heuristic.
         :param action: numpy.array of shape (num_timesteps, 4); the decision variables for each timestep.
@@ -677,7 +677,7 @@ class SingleStepFullRLVPP(VPPEnv):
                             - storage_in[i] - grid_in[i]
             assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
-        return feasible, cost
+        return feasible, cost, action
 
     def _find_feasible(self, i, action, cap_x, eps=0.5):
         """
@@ -734,7 +734,7 @@ class SingleStepFullRLVPP(VPPEnv):
         """
 
         # Solve the optimization model with the virtual costs
-        feasible, reward = self._solve(action)
+        feasible, reward, actual_action = self._solve(action)
 
         # The episode has a single timestep
         done = True
@@ -743,7 +743,7 @@ class SingleStepFullRLVPP(VPPEnv):
 
         observations = self._get_observations()
 
-        return observations, reward, done, {}
+        return observations, reward, done, {'action': actual_action}
 
 
 ########################################################################################################################
@@ -833,7 +833,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         self.output_storage = []
         self.storage_capacity = []
 
-    def _solve(self, action: np.array) -> Tuple[bool, Union[int, float]]:
+    def _solve(self, action: np.array) -> Tuple[bool, Union[int, float], np.array]:
         """
         Solve the optimization model with the greedy heuristic.
         :param action: numpy.array of shape (4, ); the decision variables for each timestep.
@@ -882,6 +882,8 @@ class MarkovianRlVPPEnv(VPPEnv):
             storage_in, storage_out, grid_in, diesel_power = feasible_action
             grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
             cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
+        else:
+            feasible_action = np.array([storage_in, storage_out, grid_in, diesel_power])
 
         # Update the storage capacity
         old_cap_x = self.storage
@@ -900,7 +902,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         power_balance = self.p_ren_pv_real[self.timestep] + storage_out + grid_out + diesel_power - storage_in - grid_in
         assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
-        return feasible, cost
+        return feasible, cost, feasible_action
 
     def _find_feasible(self, action, eps=0.5):
         """
@@ -960,7 +962,7 @@ class MarkovianRlVPPEnv(VPPEnv):
                                                     is ended, additional information.
         """
 
-        feasible, cost = self._solve(action)
+        feasible, cost, actual_action = self._solve(action)
 
         if feasible:
             self.cumulative_cost += cost
@@ -982,4 +984,4 @@ class MarkovianRlVPPEnv(VPPEnv):
         else:
             raise Exception(f"Timestep cannot be greater than {self.n}")
 
-        return observations, reward, done, {'feasible': feasible}
+        return observations, reward, done, {'feasible': feasible, 'action': actual_action}

@@ -281,9 +281,10 @@ def test_rl_algo(log_dir: str,
                 # env.render(mode='ascii')
                 _, agent_info = policy.get_action(last_obs)
                 a = agent_info['mean']
-                all_actions.append(np.squeeze(a))
-
                 step = env.step(a)
+                if 'action' in step.env_info:
+                    a = step.env_info['action']
+                all_actions.append(np.squeeze(a))
 
                 total_reward -= step.reward
                 episode_reward -= step.reward
@@ -297,6 +298,13 @@ def test_rl_algo(log_dir: str,
 
             if method == 'rl-mdp':
                 all_actions = np.expand_dims(all_actions, axis=0)
+            elif method == 'rl-single-step':
+                action = all_actions[0]
+                storage_in = action[:env.n]
+                storage_out = action[env.n:env.n * 2]
+                grid_in = action[env.n * 2:env.n * 3]
+                diesel_power = action[env.n * 3:]
+                all_actions = np.stack([storage_in, storage_out, grid_in, diesel_power], axis=-1)
 
         if 'rl' in method:
             action_save_name = 'solution'
@@ -357,10 +365,12 @@ if __name__ == '__main__':
         EPOCHS = args.epochs
         BATCH_SIZE = args.batch_size
 
-    # Randomly choose 100 instances
-    np.random.seed(0)
-    indexes = np.arange(10000, dtype=np.int32)
-    indexes = np.random.choice(indexes, size=100)
+        # Randomly choose 100 instances
+        np.random.seed(0)
+        indexes = np.arange(10000, dtype=np.int32)
+        indexes = np.random.choice(indexes, size=100)
+    else:
+        indexes = [int(x) for x in os.listdir(LOG_DIR)]
 
     print(indexes)
 
@@ -370,7 +380,7 @@ if __name__ == '__main__':
             tf.compat.v1.disable_eager_execution()
             tf.compat.v1.reset_default_graph()
             run = my_wrap_experiment(train_rl_algo, archive_launch_repo=False,
-                                     logging_dir=os.path.join(LOG_DIR, f'train_{instance_idx}'))
+                                     logging_dir=os.path.join(LOG_DIR, f'{instance_idx}'))
 
             run(method=METHOD,
                 test_split=[instance_idx],
@@ -381,7 +391,7 @@ if __name__ == '__main__':
     elif mode == 'test':
         # Test trained methods
         for idx in indexes:
-            test_rl_algo(log_dir=os.path.join(LOG_DIR, f'test_{idx}'),
+            test_rl_algo(log_dir=os.path.join(LOG_DIR, f'{idx}'),
                          predictions_filepath=os.path.join('data', 'Dataset10k.csv'),
                          shifts_filepath=os.path.join('data', 'optShift.npy'),
                          prices_filepath=os.path.join('data', 'gmePrices.npy'),

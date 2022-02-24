@@ -401,7 +401,7 @@ def solve_optimization_with_decision_vars(decision_vars: np.array,
     # action[3] -> power generated from the diesel source
 
     # Check that the decision variables have length (n_timesteps, 4)
-    assert decision_vars.shape == (n_timesteps, 4), f"decision_vars must have shape ({n_timesteps}, 4)"
+    assert decision_vars.shape == (n_timesteps, 4), f"decision_vars must have shape ({n_timesteps}, 4), found {decision_vars.shape}"
 
     storage_in = decision_vars[:, 0]
     storage_out = decision_vars[:, 1]
@@ -416,10 +416,10 @@ def solve_optimization_with_decision_vars(decision_vars: np.array,
     assert diesel_power.shape == (n_timesteps,)
 
     # Rescale the actions in their feasible ranges
-    storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
-    storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
-    grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
-    diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, p_diesel_max), value=diesel_power)
+    # storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
+    # storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
+    # grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
+    # diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, p_diesel_max), value=diesel_power)
 
     # Initialize the storage capacity and a list to keep track of step-by-step capacity
     cap_x = in_cap
