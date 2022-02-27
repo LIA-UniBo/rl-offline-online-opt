@@ -136,7 +136,7 @@ def train_rl_algo(method: str = None,
                            output_dim=actions_space,
                            hidden_units=[32, 32])'''
 
-    policy = GaussianPolicy(actions_space)
+    policy = DirichletPolicy(actions_space)
 
     agent = OnPolicyAgent(env, policy, model, baseline, standardize_q_vals=True, wandb_log=wandb_log)
 

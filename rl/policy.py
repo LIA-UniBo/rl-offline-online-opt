@@ -88,6 +88,50 @@ class GaussianPolicy:
 ########################################################################################################################
 
 
+class DirichletPolicy:
+    """
+    Actions are sampled according to a Beta distribution.
+    """
+
+    def __init__(self, actions_space):
+        """
+        :param actions_space: int; number of actions.
+        """
+
+        super(DirichletPolicy).__init__()
+        self._num_actions = actions_space
+
+    @property
+    def num_actions(self):
+        """
+        Getter for the actions space.
+        :return: int; the actions space.
+        """
+
+        return self._num_actions
+
+    @staticmethod
+    def select_action(alpha):
+        """
+        Select the action according to the Beta distribution defined by alpha and beta parameters.
+        :param size: batch size
+        """
+
+        assert len(alpha) == 1, "Expected a tuple with alpha parameter"
+
+        alpha = np.squeeze(alpha.numpy())
+        actions = np.random.dirichlet(alpha=alpha)
+
+        # If the action is a single value, create an array
+        if isinstance(actions, float):
+            actions = np.array([actions])
+
+        return actions
+
+
+########################################################################################################################
+
+
 class CategoricalRandomPolicy(CategoricalPolicy):
     """
     Actions are randomly chosen.

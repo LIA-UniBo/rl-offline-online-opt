@@ -24,7 +24,7 @@ class DRLModel(tf.keras.Model):
     Deep Reinforcement Learning base class.
     """
 
-    def __init__(self, input_shape, output_dim, hidden_units=[32, 32]):
+    def __init__(self, input_shape, output_dim, hidden_units=(32, 32)):
         """
         :param output_dim: int; output dimension of the neural network, i.e. the actions space.
         :param hidden_units: list of int; units for each hidden layer.
@@ -41,21 +41,21 @@ class DRLModel(tf.keras.Model):
             self._model.add(Dense(units=units, activation='tanh'))
 
         # Create the actor
-        self._actor_mean = Dense(output_dim)
-        self._actor_std_dev = Dense(output_dim, activation=tf.math.softplus)
+        self._actor_alpha = Dense(output_dim, activation=tf.math.softplus)
+        # self._actor_std_dev = Dense(output_dim, activation=tf.math.softplus)
 
         # Call build method to define the input shape
         self.build((None,) + input_shape)
         self.compute_output_shape(input_shape=(None, ) + input_shape)
 
         # Define optimizer
-        self._policy_optimizer = Adam()
+        self._policy_optimizer = Adam(learning_rate=1e-3)
 
         # Keep track of trainable variables
         self._actor_trainable_vars = list()
         self._actor_trainable_vars += self._model.trainable_variables
-        self._actor_trainable_vars += self._actor_mean.trainable_variables
-        self._actor_trainable_vars += self._actor_std_dev.trainable_variables
+        self._actor_trainable_vars += self._actor_alpha.trainable_variables
+        # self._actor_trainable_vars += self._actor_std_dev.trainable_variables
 
     def call(self, inputs):
         """
@@ -64,10 +64,10 @@ class DRLModel(tf.keras.Model):
         :return: tf.Tensor; the output logits.
         """
         hidden_state = self._model(inputs)
-        mean = self._actor_mean(hidden_state)
-        std_dev = self._actor_std_dev(hidden_state)
+        alpha = self._actor_alpha(hidden_state)
+        alpha = tf.math.maximum(alpha, 0.2)
 
-        return mean, std_dev
+        return alpha
 
     @from_dict_of_tensor_to_numpy
     @tf.function
@@ -85,7 +85,7 @@ class PolicyGradient(DRLModel):
         Definition of Policy Gradient RL algorithm.
     """
 
-    def __init__(self, input_shape, output_dim, hidden_units=[32, 32]):
+    def __init__(self, input_shape, output_dim, hidden_units=(32, 32)):
         super(PolicyGradient, self).__init__(input_shape, output_dim, hidden_units)
 
     @from_dict_of_tensor_to_numpy
@@ -102,10 +102,11 @@ class PolicyGradient(DRLModel):
 
         # Tape the gradient during forward step and loss computation
         with tf.GradientTape() as policy_tape:
-            logits = self.call(inputs=states)
-            gaussian = tfp.distributions.MultivariateNormalDiag(loc=logits[0], scale_diag=logits[1])
-            log_prob = gaussian.log_prob(actions)
+            alpha = self.call(inputs=states)
+            dirichlet = tfp.distributions.Dirichlet(alpha)
+            log_prob = dirichlet.log_prob(actions)
             policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
+        assert not tf.math.is_inf(policy_loss)
 
         # Perform un update step
         for watched_var, trained_var in zip(policy_tape.watched_variables(), self._actor_trainable_vars):
@@ -124,7 +125,7 @@ class A2C(DRLModel):
         Definition of Advantage Actor-Critic RL algorithm.
     """
 
-    def __init__(self, input_shape, output_dim, critic, hidden_units=[32, 32]):
+    def __init__(self, input_shape, output_dim, critic, hidden_units=(32, 32)):
         super(A2C, self).__init__(input_shape, output_dim, hidden_units)
 
         self._critic = critic
@@ -143,10 +144,11 @@ class A2C(DRLModel):
 
         # Tape the gradient during forward step and loss computation
         with tf.GradientTape() as policy_tape:
-            logits = self.call(inputs=states)
-            gaussian = tfp.distributions.MultivariateNormalDiag(loc=logits[0], scale_diag=logits[1])
-            log_prob = gaussian.log_prob(actions)
+            alpha = self.call(inputs=states)
+            dirichlet = tfp.distributions.Dirichlet(alpha)
+            log_prob = dirichlet.log_prob(actions)
             policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
+        assert not tf.math.is_inf(policy_loss)
 
         # Perform policy update step
         for watched_var, trained_var in zip(policy_tape.watched_variables(), self._actor_trainable_vars):

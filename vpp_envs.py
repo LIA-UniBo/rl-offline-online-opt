@@ -756,7 +756,7 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         # Here we define the observation and action spaces
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.n * 3 + 1,), dtype=np.float32)
-        self.action_space = Box(low=-1, high=1, shape=(4,), dtype=np.float32)
+        self.action_space = Box(low=0, high=1, shape=(4,), dtype=np.float32)
 
     @property
     def max_episode_length(self):
@@ -830,9 +830,6 @@ class MarkovianRlVPPEnv(VPPEnv):
         assert self.p_ren_pv_real is not None, "Real PV values must be initialized before the step function"
         assert self.tot_cons_real is not None, "Real Load values must be initialized before the step function"
 
-        # Enforce action space
-        action = np.clip(action, self.action_space.low, self.action_space.high)
-
         # We follow this convention:
         # action[0] -> input to storage
         # action[1] -> output from storage
@@ -845,10 +842,10 @@ class MarkovianRlVPPEnv(VPPEnv):
         diesel_power = action[3]
 
         # Rescale the actions in their feasible ranges
-        storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
-        storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
-        grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
-        diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, self.p_diesel_max), value=diesel_power)
+        storage_in = storage_in * 200
+        storage_out = storage_out * 200
+        grid_in = grid_in * 600
+        diesel_power = diesel_power * self.p_diesel_max
 
         # Keep track if the solution is feasible
         feasible = True
@@ -865,7 +862,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
         # feasible
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
-            return False, MIN_REWARD
+            return False, min(0, self.cap_max - self.storage - storage_in) + min(0, self.storage - storage_out) + min(0, grid_out)
 
         # Update the storage capacity
         old_cap_x = self.storage
