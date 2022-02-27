@@ -5,6 +5,7 @@
 """
 
 import numpy as np
+import wandb
 
 from rl.utility import calc_qvals
 from gym.spaces.discrete import Discrete
@@ -20,7 +21,7 @@ class DRLAgent:
     Abstract class for Deep Reinforcement Learning agent.
     """
 
-    def __init__(self, env, policy, model, baseline, standardize_q_vals):
+    def __init__(self, env, policy, model, baseline, standardize_q_vals, wandb_log=False):
         """
 
         :param env: gym.Environment; the agent interacts with this environment.
@@ -34,6 +35,7 @@ class DRLAgent:
         self._model = model
         self._baseline = baseline
         self._standardize_q_vals = standardize_q_vals
+        self._wandb_log = wandb_log
 
     def _step(self, action):
         """
@@ -52,6 +54,10 @@ class DRLAgent:
             assert action.shape == self._env.action_space.shape
 
             return self._env.step(action)
+
+    def _log(self, prefix='', **kwargs):
+        if self._wandb_log:
+            wandb.log({f'{prefix}{"/" if prefix else ""}{k}': v for k, v in kwargs.items()})
 
     def train(self, num_steps, render, gamma, batch_size, filename):
         """
@@ -85,6 +91,7 @@ class DRLAgent:
             game_over = False
             s_t = self._env.reset()
             score = 0
+            all_actions = []
 
             # Perform an episode
             while not game_over:
@@ -97,6 +104,7 @@ class DRLAgent:
                 # Add the batch dimension for the NN model
                 probs = self._model(np.expand_dims(s_t, axis=0))
                 a_t = self._policy.select_action(probs)
+                all_actions.append(a_t)
 
                 # Perform a step
                 s_tp1, r_t, game_over, _ = self._step(a_t)
@@ -104,6 +112,10 @@ class DRLAgent:
                 score += r_t
 
             print('Score: {}'.format(score))
+            self._log('test', score=score)
+
+        all_actions = np.squeeze(all_actions)
+        return all_actions
 
 ########################################################################################################################
 
@@ -113,7 +125,7 @@ class OnPolicyAgent(DRLAgent):
     DRL agent which requires on-policy samples.
     """
 
-    def __init__(self, env, policy, model, baseline, standardize_q_vals):
+    def __init__(self, env, policy, model, baseline, standardize_q_vals, **kwargs):
         """
 
         :param env: environment on which to train the agent; as Gym environment
@@ -122,7 +134,7 @@ class OnPolicyAgent(DRLAgent):
         :param baseline: baselines.Baseline; baseline used to reduce the variance of the Q-values.
         """
 
-        super(OnPolicyAgent, self).__init__(env, policy, model, baseline, standardize_q_vals)
+        super(OnPolicyAgent, self).__init__(env, policy, model, baseline, standardize_q_vals, **kwargs)
 
     def train(self, num_steps, render, gamma, batch_size, filename):
         """
@@ -216,7 +228,9 @@ class OnPolicyAgent(DRLAgent):
                 q_vals = tf.convert_to_tensor(q_vals[~np.isnan(q_vals)], dtype=tf.float32)
                 loss_dict = self._model.train_step(states, q_vals, adv, actions)
 
-                # Visualization
+                # Visualization and logging
+                self._log('train', score=score, episodes=num_episodes, avg_score=score / num_episodes, **loss_dict)
+
                 print_string = 'Frame: {}/{} | Total reward: {:.2f}'.format(steps, num_steps, score)
                 print_string += ' | Total number of episodes: {} | Average score: {:.2f}'.format(num_episodes,
                                                                                                  score / num_episodes)
