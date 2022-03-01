@@ -148,7 +148,13 @@ def train_rl_algo(method: str = None,
 
     # Save the agent's actions
     action_save_name = 'solution' if 'rl' in method else 'cvirt'
-    all_actions = agent.test(loadpath=filename, render=True)
+    all_actions = agent.test(loadpath=filename, render=False)
+    if method == 'rl-single-step':
+        storage_in = all_actions[:env.n]
+        storage_out = all_actions[env.n:env.n * 2]
+        grid_in = all_actions[env.n * 2:env.n * 3]
+        diesel_power = all_actions[env.n * 3:]
+        all_actions = np.stack([storage_in, storage_out, grid_in, diesel_power], axis=-1)
     solutions_filepath = os.path.join(filename, action_save_name)
     np.save(solutions_filepath, all_actions)
 
@@ -180,6 +186,8 @@ if __name__ == '__main__':
     parser.add_argument("--epochs", type=int, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, help="Batch size")
     parser.add_argument('-wk', '--wandb-key', default='', type=str, help='WandB login key')
+    parser.add_argument('--retrain', action='store_true',
+                        help='If true, retrain on instances already present in log dir (default: false)')
     args = parser.parse_args()
 
     LOG_DIR = args.logdir
@@ -204,14 +212,17 @@ if __name__ == '__main__':
 
     # Training routing
     for instance_idx in indexes:
-        print(f'Instance index: {instance_idx}')
-        run = wandb_wrap(args.wandb_key, train_rl_algo, METHOD,
-                         instance_idx=instance_idx, log_dir=LOG_DIR,
-                         cfg_dict={'epochs': EPOCHS, 'batch size': BATCH_SIZE})
-        run(method=METHOD,
-            test_split=[instance_idx],
-            num_epochs=EPOCHS,
-            batch_size=BATCH_SIZE,
-            noise_std_dev=0.01,
-            filename=os.path.join(LOG_DIR, str(instance_idx)))
-        print('-' * 50 + '\n')
+        if str(instance_idx) in os.listdir(LOG_DIR) and not args.retrain:
+            print(f'Skipping instance {instance_idx}')
+        else:
+            print(f'Instance index: {instance_idx}')
+            run = wandb_wrap(args.wandb_key, train_rl_algo, METHOD,
+                             instance_idx=instance_idx, log_dir=LOG_DIR,
+                             cfg_dict={'epochs': EPOCHS, 'batch size': BATCH_SIZE})
+            run(method=METHOD,
+                test_split=[instance_idx],
+                num_epochs=EPOCHS,
+                batch_size=BATCH_SIZE,
+                noise_std_dev=0.01,
+                filename=os.path.join(LOG_DIR, str(instance_idx)))
+            print('-' * 50 + '\n')

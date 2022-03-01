@@ -413,10 +413,10 @@ def solve_optimization_with_decision_vars(decision_vars,
     assert diesel_power.shape == (n_timesteps,)
 
     # Rescale the actions in their feasible ranges
-    storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
-    storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
-    grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
-    diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, p_diesel_max), value=diesel_power)
+    # storage_in = min_max_scaler(starting_range=(0, 1), new_range=(0, 200), value=storage_in)
+    # storage_out = min_max_scaler(starting_range=(0, 1), new_range=(0, 200), value=storage_out)
+    # grid_in = min_max_scaler(starting_range=(0, 1), new_range=(0, 600), value=grid_in)
+    # diesel_power = min_max_scaler(starting_range=(0, 1), new_range=(0, p_diesel_max), value=diesel_power)
 
     # Initialize the storage capacity and a list to keep track of step-by-step capacity
     cap_x = in_cap
@@ -577,7 +577,7 @@ def compute_real_cost(instance_idx: int,
                                                       tot_cons=tot_cons,
                                                       c_grid=c_grid)
         if real_cost == np.inf:
-            print('Found infeasible solution')
+            print('Found unfeasible solution')
 
     # Print the virtual and real costs
     print("\n============================== Solution =================================\n\n")
@@ -636,10 +636,11 @@ def compute_real_cost(instance_idx: int,
             for axis in axes:
                 axis.legend(loc=2, prop={'size': 12})
             plt.plot()
-            if wandb_log:
-                wandb.log({'eval/chart': plt, 'eval/chart_data': wandb.Table(dataframe=visualization_df)})
             if display:
                 plt.show()
+            if wandb_log:
+                visualization_df['Step'] = list(range(len(visualization_df)))
+                wandb.log({'eval/chart': plt, 'eval/chart_data': wandb.Table(dataframe=visualization_df)})
 
         # Optionally, save the solution and the cost
         if savepath is not None:

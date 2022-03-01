@@ -3,7 +3,9 @@
 """
     Single step and MDP version of the VPP environments.
 """
+from typing import List, Union, Tuple
 
+import gurobipy
 from gym import Env
 from gym.spaces import Box
 import numpy as np
@@ -655,10 +657,7 @@ class SingleStepFullRLVPP(VPPEnv):
         assert diesel_power.shape == (self.n,)
 
         # Rescale the actions in their feasible ranges
-        storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
-        storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
-        grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
-        diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, self.p_diesel_max), value=diesel_power)
+        storage_in, storage_out, grid_in, diesel_power = self._rescale((storage_in, storage_out, grid_in, diesel_power))
 
         # Initialize the storage capacitance
         cap_x = self.in_cap
@@ -710,7 +709,20 @@ class SingleStepFullRLVPP(VPPEnv):
                             - storage_in[i] - grid_in[i]
             assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
-        return feasible, cost
+        return feasible, cost, np.concatenate([storage_in, storage_out, grid_in, diesel_power])
+
+    def _rescale(self, action):
+        """
+        Rescale actions from distribution support to actual range
+        Assumes a distribution with support in (0, 1) (e.g. Beta distribution)
+        :param action: numpy.array of shape (4, ); the decision variables
+        :return: numpy.array of shape (4, ); the rescaled decision variables
+        """
+        storage_in = action[0] * 200
+        storage_out = action[1] * 200
+        grid_in = action[2] * 600
+        diesel_power = action[3] * self.p_diesel_max
+        return storage_in, storage_out, grid_in, diesel_power
 
     def _find_feasible(self, i, action, cap_x, eps=0.5):
         """
@@ -750,10 +762,15 @@ class SingleStepFullRLVPP(VPPEnv):
         # get closest feasible action
         feasible = solve(mod)
         assert feasible
-        closest = np.array([mod.getVarByName(var).X
-                            for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
-                           dtype=np.float64)
-        closest[np.abs(closest) < 1e-10] = 0  # numerical instability
+
+        # deal with numerical instability
+        closest = np.clip([mod.getVarByName(var).X
+                           for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
+                          a_min=0,
+                          a_max=[min(self.cap_max - cap_x, 200), min(cap_x, 200), 600, self.p_diesel_max],
+                          dtype=np.float64)
+        closest[np.abs(closest) < 1e-10] = 0
+
         assert not mod.getVarByName('grid_out').X < 0
         return closest
 
@@ -767,7 +784,7 @@ class SingleStepFullRLVPP(VPPEnv):
         """
 
         # Solve the optimization model with the virtual costs
-        feasible, reward = self._solve(action)
+        feasible, reward, actual_action = self._solve(action)
 
         # The episode has a single timestep
         done = True
@@ -776,7 +793,7 @@ class SingleStepFullRLVPP(VPPEnv):
 
         observations = self._get_observations()
 
-        return observations, reward, done, {}
+        return observations, reward, done, {'action': actual_action}
 
 
 ########################################################################################################################
@@ -890,16 +907,8 @@ class MarkovianRlVPPEnv(VPPEnv):
         # action[2] -> power sold to the grid
         # action[3] -> power generated from the diesel source
 
-        storage_in = action[0]
-        storage_out = action[1]
-        grid_in = action[2]
-        diesel_power = action[3]
-
         # Rescale the actions in their feasible ranges
-        storage_in = storage_in * 200
-        storage_out = storage_out * 200
-        grid_in = grid_in * 600
-        diesel_power = diesel_power * self.p_diesel_max
+        storage_in, storage_out, grid_in, diesel_power = self._rescale(action)
 
         # Keep track if the solution is feasible
         feasible = True
@@ -920,6 +929,8 @@ class MarkovianRlVPPEnv(VPPEnv):
             storage_in, storage_out, grid_in, diesel_power = feasible_action
             grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
             cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
+        else:
+            feasible_action = np.array([storage_in, storage_out, grid_in, diesel_power])
 
         # Update the storage capacity
         old_cap_x = self.storage
@@ -938,21 +949,30 @@ class MarkovianRlVPPEnv(VPPEnv):
         power_balance = self.p_ren_pv_real[self.timestep] + storage_out + grid_out + diesel_power - storage_in - grid_in
         assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
-        return feasible, cost
+        return feasible, cost, feasible_action
+
+    def _rescale(self, action):
+        """
+        Rescale actions from distribution support to actual range
+        Assumes a distribution with support in (0, 1) (e.g. Beta distribution)
+        :param action: numpy.array of shape (4, ); the decision variables
+        :return: numpy.array of shape (4, ); the rescaled decision variables
+        """
+        storage_in = action[0] * 200
+        storage_out = action[1] * 200
+        grid_in = action[2] * 600
+        diesel_power = action[3] * self.p_diesel_max
+        return np.array([storage_in, storage_out, grid_in, diesel_power])
 
     def _find_feasible(self, action, eps=0.5):
         """
         Find a feasible action using safety layer.
-        :param action: numpy.array of shape (4, ); the decision variables for each timestep
+        :param action: numpy.array of shape (4, ); the decision variables
         :param eps: float, epsilon used to limit ranges (in both direction) for numerical stability
         :return: numpy.array of shape (4, ); closest feasible action
         """
         # unpack action
-        storage_in, storage_out, grid_in, diesel_power = action
-        storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
-        storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
-        grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
-        diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, self.p_diesel_max), value=diesel_power)
+        storage_in, storage_out, grid_in, diesel_power = self._rescale(action)
 
         tilde_cons = self.shift[self.timestep] + self.tot_cons_real[self.timestep]
         tilde_ren = self.p_ren_pv_real[self.timestep]
@@ -982,10 +1002,14 @@ class MarkovianRlVPPEnv(VPPEnv):
         # get closest feasible action
         feasible = solve(mod)
         assert feasible
-        closest = np.array([mod.getVarByName(var).X
-                            for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
-                           dtype=np.float64)
-        closest[np.abs(closest) < 1e-10] = 0 # numerical instability
+        # deal with numerical instability
+        closest = np.clip([mod.getVarByName(var).X
+                           for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
+                          a_min=0,
+                          a_max=[min(self.cap_max - self.storage, 200), min(self.storage, 200), 600, self.p_diesel_max],
+                          dtype=np.float64)
+        closest[np.abs(closest) < 1e-10] = 0
+
         assert not mod.getVarByName('grid_out').X < 0
         return closest
 
@@ -998,7 +1022,7 @@ class MarkovianRlVPPEnv(VPPEnv):
                                                     is ended, additional information.
         """
 
-        feasible, cost = self._solve(action)
+        feasible, cost, actual_action = self._solve(action)
 
         if feasible:
             self.cumulative_cost += cost
@@ -1020,4 +1044,4 @@ class MarkovianRlVPPEnv(VPPEnv):
         else:
             raise Exception(f"Timestep cannot be greater than {self.n}")
 
-        return observations, reward, done, {'feasible': feasible}
+        return observations, reward, done, {'feasible': feasible, 'action': actual_action}

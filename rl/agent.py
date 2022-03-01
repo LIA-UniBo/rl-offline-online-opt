@@ -104,10 +104,12 @@ class DRLAgent:
                 # Add the batch dimension for the NN model
                 probs = self._model(np.expand_dims(s_t, axis=0))
                 a_t = self._policy.select_action(probs)
-                all_actions.append(a_t)
 
                 # Perform a step
-                s_tp1, r_t, game_over, _ = self._step(a_t)
+                s_tp1, r_t, game_over, info = self._step(a_t)
+                if 'action' in info:
+                    a_t = info['action']
+                all_actions.append(np.squeeze(a_t))
                 s_t = s_tp1
                 score += r_t
 

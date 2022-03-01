@@ -16,6 +16,49 @@ from rl.utility import from_dict_of_tensor_to_numpy
 DISCRETE_SPACE = "discrete"
 CONTINUOUS_SPACE = "continuous"
 
+
+########################################################################################################################
+
+class DistributionLayer(tf.keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super(DistributionLayer, self).__init__(**kwargs)
+
+    def call(self, x):
+        raise NotImplementedError()
+
+    def log_probs(self, output, actions):
+        raise NotImplementedError()
+
+
+class GaussianLayer(DistributionLayer):
+    def __init__(self, output_dim, **kwargs):
+        super(GaussianLayer, self).__init__(**kwargs)
+        self._actor_mean = Dense(output_dim)
+        self._actor_std_dev = Dense(output_dim, activation=tf.math.softplus)
+
+    def call(self, x):
+        mean = self._actor_mean(x)
+        std_dev = self._actor_std_dev(x)
+        return mean, std_dev
+
+    def log_probs(self, output, actions):
+        gaussian = tfp.distributions.MultivariateNormalDiag(loc=output[0], scale_diag=output[1])
+        return gaussian.log_prob(actions)
+
+
+class DirichletLayer(DistributionLayer):
+    def __init__(self, output_dim, **kwargs):
+        super(DirichletLayer, self).__init__(**kwargs)
+        self._actor_alpha = Dense(output_dim, activation=tf.math.softplus)
+
+    def call(self, x):
+        alpha = self._actor_alpha(x)
+        return tf.math.maximum(alpha, 0.2)
+
+    def log_probs(self, output, actions):
+        dirichlet = tfp.distributions.Dirichlet(output)
+        return dirichlet.log_prob(actions)
+
 ########################################################################################################################
 
 
@@ -41,12 +84,11 @@ class DRLModel(tf.keras.Model):
             self._model.add(Dense(units=units, activation='tanh'))
 
         # Create the actor
-        self._actor_alpha = Dense(output_dim, activation=tf.math.softplus)
-        # self._actor_std_dev = Dense(output_dim, activation=tf.math.softplus)
+        self._actor_output = DirichletLayer(output_dim)
 
         # Call build method to define the input shape
         self.build((None,) + input_shape)
-        self.compute_output_shape(input_shape=(None, ) + input_shape)
+        self.compute_output_shape(input_shape=(None,) + input_shape)
 
         # Define optimizer
         self._policy_optimizer = Adam(learning_rate=1e-3)
@@ -54,8 +96,7 @@ class DRLModel(tf.keras.Model):
         # Keep track of trainable variables
         self._actor_trainable_vars = list()
         self._actor_trainable_vars += self._model.trainable_variables
-        self._actor_trainable_vars += self._actor_alpha.trainable_variables
-        # self._actor_trainable_vars += self._actor_std_dev.trainable_variables
+        self._actor_trainable_vars += self._actor_output.trainable_variables
 
     def call(self, inputs):
         """
@@ -64,10 +105,7 @@ class DRLModel(tf.keras.Model):
         :return: tf.Tensor; the output logits.
         """
         hidden_state = self._model(inputs)
-        alpha = self._actor_alpha(hidden_state)
-        alpha = tf.math.maximum(alpha, 0.2)
-
-        return alpha
+        return self._actor_output(hidden_state)
 
     @from_dict_of_tensor_to_numpy
     @tf.function
@@ -76,6 +114,7 @@ class DRLModel(tf.keras.Model):
         A single training step.
         """
         raise NotImplementedError()
+
 
 ########################################################################################################################
 
@@ -89,7 +128,7 @@ class PolicyGradient(DRLModel):
         super(PolicyGradient, self).__init__(input_shape, output_dim, hidden_units)
 
     @from_dict_of_tensor_to_numpy
-    #@tf.function
+    # @tf.function
     def train_step(self, states, q_vals, adv, actions):
         """
         Compute loss and gradients. Perform a training step.
@@ -102,9 +141,8 @@ class PolicyGradient(DRLModel):
 
         # Tape the gradient during forward step and loss computation
         with tf.GradientTape() as policy_tape:
-            alpha = self.call(inputs=states)
-            dirichlet = tfp.distributions.Dirichlet(alpha)
-            log_prob = dirichlet.log_prob(actions)
+            output = self.call(inputs=states)
+            log_prob = self._actor_output.log_probs(output, actions)
             policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
         assert not tf.math.is_inf(policy_loss)
 
@@ -115,6 +153,7 @@ class PolicyGradient(DRLModel):
         self._policy_optimizer.apply_gradients(zip(dloss_policy, self._actor_trainable_vars))
 
         return {'Policy loss': policy_loss}
+
 
 ########################################################################################################################
 
@@ -131,7 +170,7 @@ class A2C(DRLModel):
         self._critic = critic
 
     @from_dict_of_tensor_to_numpy
-    #@tf.function
+    # @tf.function
     def train_step(self, states, q_vals, adv, actions):
         """
         Compute loss and gradients. Perform a training step.
@@ -144,9 +183,8 @@ class A2C(DRLModel):
 
         # Tape the gradient during forward step and loss computation
         with tf.GradientTape() as policy_tape:
-            alpha = self.call(inputs=states)
-            dirichlet = tfp.distributions.Dirichlet(alpha)
-            log_prob = dirichlet.log_prob(actions)
+            output = self.call(inputs=states)
+            log_prob = self._actor_output.log_probs(output, actions)
             policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
         assert not tf.math.is_inf(policy_loss)
 
