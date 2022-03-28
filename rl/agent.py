@@ -256,3 +256,156 @@ class OnPolicyAgent(DRLAgent):
             self._model.save(filename)
 
 ########################################################################################################################
+
+
+class OnPolicySafetyEditorAgent(DRLAgent):
+    """
+    DRL agent which requires on-policy samples.
+    """
+
+    def __init__(self, env, policy, model, baseline, editor, standardize_q_vals, **kwargs):
+        """
+
+        :param env: environment on which to train the agent; as Gym environment
+        :param policy: policy defined as a probability distribution of actions over states; as policy.Policy
+        :param model: DRL model; as models.DRLModel
+        :param baseline: baselines.Baseline; baseline used to reduce the variance of the Q-values.
+        """
+
+        super(OnPolicySafetyEditorAgent, self).__init__(env, policy, model, baseline, standardize_q_vals, **kwargs)
+        self._editor = editor
+
+    def train(self, num_steps, render, gamma, batch_size, filename):
+        """
+        Training loop.
+        :param num_steps: int; training steps in the environment.
+        :param render: bool; True if you want to render the environment while training.
+        :param gamma: float; discount factor.
+        :param batch_size: int; batch size.
+        :param filename: string; file path where model weights will be saved.
+        :return:
+        """
+
+        # Training steps
+        steps = 0
+
+        # Sampled trajectory variables
+        hat_actions = list()
+        delta_actions = list()
+        actions = list()
+        states = list()
+        q_vals = list()
+
+        score = 0
+        num_episodes = 0
+
+        while steps < num_steps:
+
+            # Initialize the environment
+            game_over = False
+            s_t = self._env.reset()
+
+            # Reset current episode states, actions and rewards
+            current_states = list()
+            current_hat_actions = list()
+            current_delta_actions = list()
+            current_actions = list()
+            current_rewards = list()
+
+            # Keep track of the episode number
+            num_episodes += 1
+
+            # Perform an episode
+            while not game_over:
+
+                # Render the environment if required
+                if render:
+                    self._env.render()
+
+                # Sample an action from policy
+                # Add the batch dimension for the NN model
+                probs = self._model(np.expand_dims(s_t, axis=0))
+                hat_action = self._policy.select_action(probs)
+                delta_action = self._editor(s_t, hat_action)
+                action = self._safe_action(hat_action, delta_action)
+
+                current_hat_actions.append(hat_action)
+                current_delta_actions.append(delta_action)
+                current_actions.append(action)
+
+                # Sample current state, next state and reward
+                current_states.append(s_t)
+                s_tp1, r_t, game_over, _ = self._step(action)
+                current_rewards.append(r_t)
+                s_t = s_tp1
+
+                # Increase the score and the steps counter
+                score += r_t
+                steps += 1
+
+            # Compute the Q-values
+            current_q_vals = calc_qvals(current_rewards,
+                                        gamma=gamma,
+                                        max_episode_length=self._env.max_episode_length)
+
+            # Keep track of trajectories
+            states = states + current_states
+            hat_actions += current_hat_actions
+            delta_actions += current_delta_actions
+            actions = actions + current_actions
+            q_vals.append(current_q_vals)
+
+            # Training step
+            if len(states) >= batch_size:
+                # Convert trajectories from list to array
+                states = np.asarray(states)
+                hat_actions = np.asarray(hat_actions)
+                delta_actions = np.asarray(delta_actions)
+                actions = np.asarray(actions)
+                q_vals = np.asarray(q_vals)
+
+                if self._standardize_q_vals:
+                    mean = np.nanmean(q_vals, axis=0)
+                    std = np.nanstd(q_vals, axis=0)
+                    q_vals = (q_vals - mean) / (std + 1e-5)
+
+                # Compute advatange
+                adv = self._baseline.compute_advantage(states, q_vals)
+
+                # Perform a gradient descent step
+                # Convert states, Q-values and advantage to tensor
+                states = tf.convert_to_tensor(states, dtype=tf.float32)
+                hat_actions = tf.convert_to_tensor(hat_actions, dtype=tf.float32)
+                delta_actions = tf.convert_to_tensor(delta_actions, dtype=tf.float32)
+                actions = tf.convert_to_tensor(actions, dtype=tf.float32)
+                adv = tf.convert_to_tensor(adv, dtype=tf.float32)
+                q_vals = tf.convert_to_tensor(q_vals[~np.isnan(q_vals)], dtype=tf.float32)
+                loss_dict = self._model.train_step(states, q_vals, adv, actions)
+                # TODO train_step of the editor (be careful with tensors and detach)
+
+                # Visualization and logging
+                self._log('train', score=score, episodes=num_episodes, avg_score=score / num_episodes, **loss_dict)
+
+                print_string = 'Frame: {}/{} | Total reward: {:.2f}'.format(steps, num_steps, score)
+                print_string += ' | Total number of episodes: {} | Average score: {:.2f}'.format(num_episodes,
+                                                                                                 score / num_episodes)
+                for loss_name, loss_value in loss_dict.items():
+                    print_string += ' | {}: {:.5f} '.format(loss_name, loss_value)
+
+                print(print_string + '\n')
+                print('-'*len(print_string) + '\n')
+
+                # Clear trajectory variables
+                states = list()
+                actions = list()
+                q_vals = list()
+
+                # Reset score and number of episodes
+                score = 0
+                num_episodes = 0
+
+        # Save model
+        if filename is not None:
+            self._model.save(filename)
+
+########################################################################################################################

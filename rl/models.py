@@ -200,3 +200,5 @@ class A2C(DRLModel):
         return {'Policy loss': policy_loss, 'Critic loss': critic_loss}
 
 ########################################################################################################################
+
+# TODO define editor model
