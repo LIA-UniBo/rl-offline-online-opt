@@ -30,7 +30,7 @@ def wandb_wrap(wandb_key, algo, method, instance_idx, log_dir, cfg_dict=None):
     def exec_run(*args, **kwargs):
         if wandb_key:
             run = wandb.init(project="rl-online-offline-opt", entity="mazelions", group=method,
-                             dir=log_dir, reinit=True, config=cfg_dict, tags=[f'{instance_idx}'])
+                             dir=log_dir, reinit=True, config=cfg_dict, tags=[f'{instance_idx}', 'safety editor', 'Dirichlet'])
             wandb.define_metric('train/loss', step_metric="train_step", summary="min")
             res = algo(*args, **kwargs, wandb_log=True)
             run.finish()
@@ -114,6 +114,7 @@ def train_rl_algo(method: str = None,
                                 shift=shift,
                                 c_grid=c_grid,
                                 noise_std_dev=noise_std_dev,
+                                return_constraints=True,
                                 savepath=None)
 
     # Get the actions space

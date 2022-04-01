@@ -9,6 +9,7 @@ import tensorflow as tf
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import InputLayer, Dense
 from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.losses import MSE, Huber
 
 ########################################################################################################################
 
@@ -61,7 +62,7 @@ class Critic(Baseline, tf.keras.Model):
     Critic Neural Network that approximates the Value-function
     """
 
-    def __init__(self, input_shape, hidden_units=[32, 32]):
+    def __init__(self, input_shape, hidden_units=(64, 64)):
         """
         :param hidden_units: list of int; units for each hidden layer.
         """
@@ -80,7 +81,7 @@ class Critic(Baseline, tf.keras.Model):
         self.compute_output_shape(input_shape=(None, ) + input_shape)
 
         # Define optimizer
-        self._optimizer = Adam()
+        self._optimizer = Adam(lr=1e-4)
 
     def call(self, inputs):
         """
@@ -96,10 +97,12 @@ class Critic(Baseline, tf.keras.Model):
         """
         A single training step.
         """
-
+        q_vals = tf.squeeze(q_vals)
         with tf.GradientTape() as tape:
             value_function = self.call(states)
-            loss = tf.reduce_mean(tf.square(q_vals - value_function), axis=0)
+            value_function = tf.squeeze(value_function)
+            loss = MSE(q_vals, value_function)
+            # loss = tf.reduce_mean(tf.square(q_vals - value_function), axis=0)
 
         for watched_var, trained_var in zip(tape.watched_variables(), self._model.trainable_variables):
             assert watched_var.ref() == trained_var.ref()

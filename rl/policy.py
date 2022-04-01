@@ -6,6 +6,7 @@
 
 import random
 import numpy as np
+import tensorflow_probability as tfp
 from .utility import from_integer_to_categorical
 
 ########################################################################################################################
@@ -117,10 +118,10 @@ class DirichletPolicy:
         :param size: batch size
         """
 
-        assert len(alpha) == 1, "Expected a tuple with alpha parameter"
+        # assert len(alpha) == 1, "Expected a tuple with alpha parameter"
 
-        alpha = np.squeeze(alpha.numpy())
-        actions = np.random.dirichlet(alpha=alpha)
+        dirichlet = tfp.distributions.Dirichlet(alpha)
+        actions = dirichlet.sample()
 
         # If the action is a single value, create an array
         if isinstance(actions, float):

@@ -49,11 +49,12 @@ class GaussianLayer(DistributionLayer):
 class DirichletLayer(DistributionLayer):
     def __init__(self, output_dim, **kwargs):
         super(DirichletLayer, self).__init__(**kwargs)
-        self._actor_alpha = Dense(output_dim, activation=tf.math.softplus)
+        self._actor_alpha = Dense(output_dim, activation=tf.math.softplus, bias_initializer=tf.keras.initializers.Ones())
 
     def call(self, x):
         alpha = self._actor_alpha(x)
-        return tf.math.maximum(alpha, 0.2)
+        eps = tf.where(alpha < 0.3, 0.3, 0)
+        return alpha + eps
 
     def log_probs(self, output, actions):
         dirichlet = tfp.distributions.Dirichlet(output)
@@ -67,7 +68,7 @@ class DRLModel(tf.keras.Model):
     Deep Reinforcement Learning base class.
     """
 
-    def __init__(self, input_shape, output_dim, hidden_units=(32, 32)):
+    def __init__(self, input_shape, output_dim, hidden_units=(64, 64)):
         """
         :param output_dim: int; output dimension of the neural network, i.e. the actions space.
         :param hidden_units: list of int; units for each hidden layer.
@@ -84,19 +85,19 @@ class DRLModel(tf.keras.Model):
             self._model.add(Dense(units=units, activation='tanh'))
 
         # Create the actor
-        self._actor_output = DirichletLayer(output_dim)
+        self.actor_output = DirichletLayer(output_dim)
 
         # Call build method to define the input shape
         self.build((None,) + input_shape)
         self.compute_output_shape(input_shape=(None,) + input_shape)
 
         # Define optimizer
-        self._policy_optimizer = Adam(learning_rate=1e-3)
+        self._policy_optimizer = Adam(learning_rate=3e-4)
 
         # Keep track of trainable variables
         self._actor_trainable_vars = list()
         self._actor_trainable_vars += self._model.trainable_variables
-        self._actor_trainable_vars += self._actor_output.trainable_variables
+        self._actor_trainable_vars += self.actor_output.trainable_variables
 
     def call(self, inputs):
         """
@@ -105,7 +106,7 @@ class DRLModel(tf.keras.Model):
         :return: tf.Tensor; the output logits.
         """
         hidden_state = self._model(inputs)
-        return self._actor_output(hidden_state)
+        return self.actor_output(hidden_state)
 
     @from_dict_of_tensor_to_numpy
     @tf.function
@@ -114,6 +115,10 @@ class DRLModel(tf.keras.Model):
         A single training step.
         """
         raise NotImplementedError()
+
+    @property
+    def actor_trainable_vars(self):
+        return self._actor_trainable_vars
 
 
 ########################################################################################################################
@@ -142,7 +147,7 @@ class PolicyGradient(DRLModel):
         # Tape the gradient during forward step and loss computation
         with tf.GradientTape() as policy_tape:
             output = self.call(inputs=states)
-            log_prob = self._actor_output.log_probs(output, actions)
+            log_prob = self.actor_output.log_probs(output, actions)
             policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
         assert not tf.math.is_inf(policy_loss)
 
@@ -201,4 +206,33 @@ class A2C(DRLModel):
 
 ########################################################################################################################
 
-# TODO define editor model
+class Editor(DRLModel):
+    def __init__(self, input_shape, output_dim, critic: Critic, hidden_units=(32, 32)):
+        super(Editor, self).__init__(input_shape, output_dim, hidden_units)
+        self.critic = critic
+
+    def call(self, inputs):
+        if tf.nest.is_nested(inputs):
+            assert isinstance(inputs, (tuple, list)), f'Needs to be a tuple or a list of tensors'
+            inputs = tf.concat(inputs, axis=-1)
+        return super().call(inputs)
+
+    def train_step(self, states, q_vals, actions):
+        adv = self.critic.compute_advantage(states, q_vals)
+        # Tape the gradient during forward step and loss computation
+        with tf.GradientTape() as policy_tape:
+            output = self.call((states, actions))
+            log_prob = self.actor_output.log_probs(output, actions)
+            policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
+        assert not tf.math.is_inf(policy_loss)
+
+        # Perform un update step
+        for watched_var, trained_var in zip(policy_tape.watched_variables(), self._actor_trainable_vars):
+            assert watched_var.ref() == trained_var.ref()
+        dloss_policy = policy_tape.gradient(policy_loss, self._actor_trainable_vars)
+        self._policy_optimizer.apply_gradients(zip(dloss_policy, self._actor_trainable_vars))
+
+        # Perform critic update step
+        critic_loss = self.critic.train_step(states, tf.reshape(q_vals, shape=[-1, 1]))
+
+        return {'Policy loss': policy_loss, 'Critic loss': critic_loss}

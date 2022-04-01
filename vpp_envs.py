@@ -19,7 +19,7 @@ from abc import abstractmethod
 
 ########################################################################################################################
 
-MIN_REWARD = -10000
+MIN_REWARD = -5000
 TIMESTEP_IN_A_DAY = 96
 
 ########################################################################################################################
@@ -813,6 +813,8 @@ class MarkovianRlVPPEnv(VPPEnv):
                  predictions,
                  c_grid,
                  shift,
+                 safety_layer=True,
+                 return_constraints=False,
                  noise_std_dev=0.02,
                  savepath=None):
         """
@@ -829,9 +831,28 @@ class MarkovianRlVPPEnv(VPPEnv):
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.n * 3 + 1,), dtype=np.float32)
         self.action_space = Box(low=0, high=1, shape=(4,), dtype=np.float32)
 
+        # switch to control usage of safety layer
+        self._safety_layer = safety_layer
+
+        # if True, environment also return constraint rewards for training safety editor policy
+        self.return_constraints = return_constraints
+
     @property
     def max_episode_length(self):
         return TIMESTEP_IN_A_DAY
+
+    @property
+    def safety_layer(self):
+        return self._safety_layer
+
+    @safety_layer.setter
+    def safety_layer(self, value=None):
+        if value is None:
+            self._safety_layer = not self._safety_layer
+        elif isinstance(value, bool):
+            self._safety_layer = value
+        else:
+            raise ValueError(f'safety layer setter value must be bool, got {value}')
 
     def _create_instance_variables(self):
         """
@@ -910,9 +931,6 @@ class MarkovianRlVPPEnv(VPPEnv):
         # Rescale the actions in their feasible ranges
         storage_in, storage_out, grid_in, diesel_power = self._rescale(action)
 
-        # Keep track if the solution is feasible
-        feasible = True
-
         # Shift from Demand Side Energy Management System
         tilde_cons = (self.shift[self.timestep] + self.tot_cons_real[self.timestep])
 
@@ -925,12 +943,19 @@ class MarkovianRlVPPEnv(VPPEnv):
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
         # feasible. Use safety layer to compute closest feasible action
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
-            feasible_action = self._find_feasible(action)
-            storage_in, storage_out, grid_in, diesel_power = feasible_action
-            grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
-            cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
+            constaint_violation = min(grid_out, 0) + min(self.storage - storage_out, 0) + min(self.cap_max - self.storage - storage_in, 0)
+            if self.safety_layer:
+                feasible_action = self._find_feasible(action)
+                storage_in, storage_out, grid_in, diesel_power = feasible_action
+                grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
+                cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
+            else:
+                # training phase, stop episode and return constraint violation reward
+                cost = MIN_REWARD
+                return {'cost': cost, 'constraints': constaint_violation}, None
         else:
             feasible_action = np.array([storage_in, storage_out, grid_in, diesel_power])
+            constaint_violation = 0
 
         # Update the storage capacity
         old_cap_x = self.storage
@@ -949,7 +974,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         power_balance = self.p_ren_pv_real[self.timestep] + storage_out + grid_out + diesel_power - storage_in - grid_in
         assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
-        return feasible, cost, feasible_action
+        return {'cost': cost, 'constraints': constaint_violation}, feasible_action
 
     def _rescale(self, action):
         """
@@ -1022,7 +1047,10 @@ class MarkovianRlVPPEnv(VPPEnv):
                                                     is ended, additional information.
         """
 
-        feasible, cost, actual_action = self._solve(action)
+        rewards, actual_action = self._solve(action)
+        cost, constraint_reward = rewards['cost'], rewards['constraints']
+        # action is feasible if no constraint is violated, i.e. reward is 0, or safety layer is enabled
+        feasible = (constraint_reward == 0) or self.safety_layer
 
         if feasible:
             self.cumulative_cost += cost
@@ -1044,4 +1072,6 @@ class MarkovianRlVPPEnv(VPPEnv):
         else:
             raise Exception(f"Timestep cannot be greater than {self.n}")
 
+        if self.return_constraints:
+            reward = {'cost': reward, 'constraints': constraint_reward}
         return observations, reward, done, {'feasible': feasible, 'action': actual_action}
