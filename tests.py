@@ -12,8 +12,8 @@ import argparse
 from typing import Union, List
 import wandb
 from rl.policy import GaussianPolicy, DirichletPolicy
-from rl.agent import OnPolicyAgent
-from rl.models import PolicyGradient, A2C
+from rl.agent import SafetyEditorAgent
+from rl.models import PolicyGradient, A2C, Editor
 from rl.baselines import SimpleBaseline, Critic
 
 ########################################################################################################################
@@ -37,6 +37,7 @@ def wandb_wrap(wandb_key, algo, method, instance_idx, log_dir, cfg_dict=None):
         else:
             res = algo(*args, **kwargs, wandb_log=False)
         return res
+
     return exec_run
 
 
@@ -124,22 +125,23 @@ def train_rl_algo(method: str = None,
 
     # Create and train the RL agent
 
-    baseline = Critic(input_shape=env.observation_space.shape,
-                      hidden_units=[32, 32])
-
-    # baseline = SimpleBaseline()
     model = A2C(input_shape=env.observation_space.shape,
                 output_dim=actions_space,
-                critic=baseline,
-                hidden_units=[32, 32])
-
+                critic=Critic(input_shape=env.observation_space.shape,
+                              hidden_units=[64, 64]),
+                hidden_units=[64, 64])
+    editor = Editor(input_shape=(env.observation_space.shape[0] + actions_space, ),
+                    output_dim=actions_space,
+                    critic=Critic(input_shape=env.observation_space.shape,
+                                  hidden_units=[64, 64]),
+                    hidden_units=[64, 64])
     '''model = PolicyGradient(input_shape=env.observation_space.shape,
                            output_dim=actions_space,
                            hidden_units=[32, 32])'''
 
     policy = DirichletPolicy(actions_space)
 
-    agent = OnPolicyAgent(env, policy, model, baseline, standardize_q_vals=True, wandb_log=wandb_log)
+    agent = SafetyEditorAgent(env, policy, model, editor, standardize_q_vals=True, wandb_log=wandb_log)
 
     agent.train(num_steps=num_epochs * batch_size,
                 render=False,
@@ -167,6 +169,7 @@ def train_rl_algo(method: str = None,
                       display=False,
                       savepath=filename,
                       wandb_log=wandb_log)
+
 
 ########################################################################################################################
 

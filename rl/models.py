@@ -9,6 +9,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Input
 from tensorflow.keras.optimizers import Adam
 import tensorflow_probability as tfp
+
+from rl.baselines import Critic
 from rl.utility import from_dict_of_tensor_to_numpy
 
 ########################################################################################################################
@@ -59,6 +61,7 @@ class DirichletLayer(DistributionLayer):
     def log_probs(self, output, actions):
         dirichlet = tfp.distributions.Dirichlet(output)
         return dirichlet.log_prob(actions)
+
 
 ########################################################################################################################
 
@@ -120,6 +123,8 @@ class DRLModel(tf.keras.Model):
     def actor_trainable_vars(self):
         return self._actor_trainable_vars
 
+    def apply_gradients(self, gradient):
+        self._policy_optimizer.apply_gradients(zip(gradient, self._actor_trainable_vars))
 
 ########################################################################################################################
 
@@ -163,46 +168,35 @@ class PolicyGradient(DRLModel):
 ########################################################################################################################
 
 
-# FIXME: we must ensure the baseline used to compute the advantage is the same of the A2C instance
-class A2C(DRLModel):
+class A2C(PolicyGradient):
     """
         Definition of Advantage Actor-Critic RL algorithm.
     """
 
-    def __init__(self, input_shape, output_dim, critic, hidden_units=(32, 32)):
+    def __init__(self, input_shape, output_dim, critic: Critic, hidden_units=(32, 32)):
         super(A2C, self).__init__(input_shape, output_dim, hidden_units)
 
-        self._critic = critic
+        self.critic = critic
 
     @from_dict_of_tensor_to_numpy
     # @tf.function
-    def train_step(self, states, q_vals, adv, actions):
+    def train_step(self, states, q_vals, actions):
         """
         Compute loss and gradients. Perform a training step.
         :param states: numpy.array; states of sampled trajectories.
         :param q_vals: list of float; expected return computed with Monte Carlo sampling.
-        :param adv: numpy.array; the advantage for each action in the sampled trajectories.
         :param actions: numpy.array; actions of sampled trajectories.
         :return: loss: float; policy loss value.
         """
-
-        # Tape the gradient during forward step and loss computation
-        with tf.GradientTape() as policy_tape:
-            output = self.call(inputs=states)
-            log_prob = self._actor_output.log_probs(output, actions)
-            policy_loss = tf.reduce_mean(tf.multiply(-log_prob, adv))
-        assert not tf.math.is_inf(policy_loss)
-
-        # Perform policy update step
-        for watched_var, trained_var in zip(policy_tape.watched_variables(), self._actor_trainable_vars):
-            assert watched_var.ref() == trained_var.ref()
-        dloss_policy = policy_tape.gradient(policy_loss, self._actor_trainable_vars)
-        self._policy_optimizer.apply_gradients(zip(dloss_policy, self._actor_trainable_vars))
+        # FIXME verificare che adv sia tensore
+        adv = self.critic.compute_advantage(states, q_vals)
+        loss_info = super().train_step(states, q_vals, adv, actions)
 
         # Perform critic update step
-        critic_loss = self._critic.train_step(states, tf.reshape(q_vals, shape=[-1, 1]))
+        critic_loss = self.critic.train_step(states, tf.reshape(q_vals, shape=[-1, 1]))
+        loss_info['Critic loss'] = critic_loss
+        return loss_info
 
-        return {'Policy loss': policy_loss, 'Critic loss': critic_loss}
 
 ########################################################################################################################
 

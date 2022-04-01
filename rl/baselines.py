@@ -111,15 +111,13 @@ class Critic(Baseline, tf.keras.Model):
 
         return loss
 
-    def compute_baseline(self, states, q_vals):
-        value_function = self.call(states).numpy()
-        value_function = np.squeeze(value_function)
+    def compute_baseline(self, states):
+        value_function = self.call(states)
+        value_function = tf.squeeze(value_function)
         return value_function
 
     def compute_advantage(self, states, q_vals):
-
-        q_vals = q_vals[~np.isnan(q_vals)]
-        adv = q_vals - self.compute_baseline(states, q_vals)
-
+        # q_vals = q_vals[~np.isnan(q_vals)]
+        adv = q_vals - self.compute_baseline(states)
         return adv
 

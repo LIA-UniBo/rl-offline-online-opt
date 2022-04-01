@@ -23,7 +23,7 @@ class DRLAgent(tf.Module):
     Abstract class for Deep Reinforcement Learning agent.
     """
 
-    def __init__(self, env, policy, model, baseline, standardize_q_vals, wandb_log=False):
+    def __init__(self, env, policy, model, standardize_q_vals, wandb_log=False, **kwargs):
         """
 
         :param env: gym.Environment; the agent interacts with this environment.
@@ -36,7 +36,6 @@ class DRLAgent(tf.Module):
         self._env = env
         self._policy = policy
         self._model = model
-        self._baseline = baseline
         self._standardize_q_vals = standardize_q_vals
         self._wandb_log = wandb_log
 
@@ -138,16 +137,15 @@ class OnPolicyAgent(DRLAgent):
     DRL agent which requires on-policy samples.
     """
 
-    def __init__(self, env, policy, model, baseline, standardize_q_vals, **kwargs):
+    def __init__(self, env, policy, model, standardize_q_vals, **kwargs):
         """
 
         :param env: environment on which to train the agent; as Gym environment
         :param policy: policy defined as a probability distribution of actions over states; as policy.Policy
         :param model: DRL model; as models.DRLModel
-        :param baseline: baselines.Baseline; baseline used to reduce the variance of the Q-values.
         """
 
-        super(OnPolicyAgent, self).__init__(env, policy, model, baseline, standardize_q_vals, **kwargs)
+        super(OnPolicyAgent, self).__init__(env, policy, model, standardize_q_vals, **kwargs)
 
     def train(self, num_steps, render, gamma, batch_size, filename):
         """
@@ -229,16 +227,12 @@ class OnPolicyAgent(DRLAgent):
                     std = np.nanstd(q_vals, axis=0)
                     q_vals = (q_vals - mean) / (std + 1e-5)
 
-                # Compute advatange
-                adv = self._baseline.compute_advantage(states, q_vals)
-
                 # Perform a gradient descent step
                 # Convert states, Q-values and advantage to tensor
                 states = tf.convert_to_tensor(states, dtype=tf.float32)
                 actions = tf.convert_to_tensor(actions, dtype=tf.float32)
-                adv = tf.convert_to_tensor(adv, dtype=tf.float32)
                 q_vals = tf.convert_to_tensor(q_vals[~np.isnan(q_vals)], dtype=tf.float32)
-                loss_dict = self._model.train_step(states, q_vals, adv, actions)
+                loss_dict = self._model.train_step(states, q_vals, actions)
 
                 # Visualization and logging
                 self._log('train', score=score, episodes=num_episodes, avg_score=score / num_episodes, **loss_dict)
@@ -275,7 +269,7 @@ class SafetyEditorAgent(DRLAgent):
     DRL agent which requires on-policy samples.
     """
 
-    def __init__(self, env, policy, model, baseline, editor, standardize_q_vals, **kwargs):
+    def __init__(self, env, policy, model, editor, standardize_q_vals, lagrangian=0.5, **kwargs):
         """
 
         :param env: environment on which to train the agent; as Gym environment
@@ -284,7 +278,7 @@ class SafetyEditorAgent(DRLAgent):
         :param baseline: baselines.Baseline; baseline used to reduce the variance of the Q-values.
         """
 
-        super(OnPolicySafetyEditorAgent, self).__init__(env, policy, model, baseline, standardize_q_vals, **kwargs)
+        super(SafetyEditorAgent, self).__init__(env, policy, model, standardize_q_vals, **kwargs)
         self._editor = editor
         self.lagrangian = lagrangian
 
@@ -453,10 +447,12 @@ class SafetyEditorAgent(DRLAgent):
                 # Convert states, Q-values and advantage to tensor
                 states = tf.convert_to_tensor(states, dtype=tf.float32)
                 actions = tf.convert_to_tensor(actions, dtype=tf.float32)
-                adv = tf.convert_to_tensor(adv, dtype=tf.float32)
-                q_vals = tf.convert_to_tensor(q_vals[~np.isnan(q_vals)], dtype=tf.float32)
-                loss_dict = self._model.train_step(states, q_vals, adv, actions)
-                # TODO train_step of the editor (be careful with tensors and detach)
+                ahats = tf.convert_to_tensor(ahats, dtype=tf.float32)
+                adeltas = tf.convert_to_tensor(adeltas, dtype=tf.float32)
+                q_vals_cost = tf.convert_to_tensor(q_vals_cost[~np.isnan(q_vals_cost)], dtype=tf.float32)
+                q_vals_cons = tf.convert_to_tensor(q_vals_cons[~np.isnan(q_vals_cons)], dtype=tf.float32)
+
+                loss_dict = self._train_step(states, q_vals_cost, q_vals_cons, actions, ahats, adeltas)
 
                 # Visualization and logging
                 self._log('train', score=score, constraints=rcons_t, episodes=num_episodes,
@@ -487,4 +483,8 @@ class SafetyEditorAgent(DRLAgent):
         if filename is not None:
             self._model.save(filename)
 
+    def _safe_action(self, hat_a, delta_a):
+        lb = tf.zeros(4, dtype=tf.float32)
+        ub = tf.ones(4, dtype=tf.float32)
+        return tf.math.minimum(tf.math.maximum(hat_a + delta_a, lb), ub)
 ########################################################################################################################
