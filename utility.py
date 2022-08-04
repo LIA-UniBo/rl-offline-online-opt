@@ -13,6 +13,7 @@ from garage.experiment.experiment import ExperimentTemplate
 ########################################################################################################################
 
 
+# TODO remove or update to use pyagents
 def my_wrap_experiment(function,
                        logging_dir,
                        *,

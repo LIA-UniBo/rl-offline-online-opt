@@ -12,10 +12,8 @@ from garage.tf.baselines import ContinuousMLPBaseline
 from garage.sampler import LocalSampler
 from garage.tf.algos import VPG
 from garage.tf.policies import GaussianMLPPolicy
-from garage.trainer import TFTrainer
 from garage.envs import GymEnv
 from garage.envs.normalized_env import NormalizedEnv
-from garage import wrap_experiment
 import tensorflow as tf
 import cloudpickle
 import os
@@ -61,103 +59,101 @@ def train_rl_algo(ctxt: garage.experiment.SnapshotConfig = None,
     assert method in METHODS, f"{method} is not valid"
     print(f'Selected method: {method}')
 
-    # A trainer provides a default TensorFlow session using python context
-    with TFTrainer(snapshot_config=ctxt) as trainer:
+    # Load data from file
+    # Check that all the required files exist
+    assert os.path.isfile(predictions_filepath), f"{predictions_filepath} does not exist"
+    assert os.path.isfile(prices_filepath), f"{prices_filepath} does not exist"
+    assert os.path.isfile(shifts_filepath), f"{shifts_filepath} does not exist"
+    predictions = pd.read_csv(predictions_filepath)
+    shift = np.load(shifts_filepath)
+    c_grid = np.load(prices_filepath)
 
-        # Load data from file
-        # Check that all the required files exist
-        assert os.path.isfile(predictions_filepath), f"{predictions_filepath} does not exist"
-        assert os.path.isfile(prices_filepath), f"{prices_filepath} does not exist"
-        assert os.path.isfile(shifts_filepath), f"{shifts_filepath} does not exist"
-        predictions = pd.read_csv(predictions_filepath)
-        shift = np.load(shifts_filepath)
-        c_grid = np.load(prices_filepath)
+    # Split between training and test
+    if isinstance(test_split, float):
+        split_index = int(len(predictions) * (1 - test_split))
+        train_predictions = predictions[:split_index]
+    elif isinstance(test_split, list):
+        split_index = test_split
+        train_predictions = predictions.iloc[split_index]
+    else:
+        raise Exception("test_split must be list of int or float")
 
-        # Split between training and test
-        if isinstance(test_split, float):
-            split_index = int(len(predictions) * (1 - test_split))
-            train_predictions = predictions[:split_index]
-        elif isinstance(test_split, list):
-            split_index = test_split
-            train_predictions = predictions.iloc[split_index]
-        else:
-            raise Exception("test_split must be list of int or float")
+    # Set episode length and discount factor for single-step and MDP version
+    if 'mdp' in method:
+        max_episode_length = TIMESTEP_IN_A_DAY
+        discount = 0.99
+    elif 'single-step' in method:
+        max_episode_length = 1
+        discount = 0
+    else:
+        raise Exception("Method name must contain 'mdp' or 'single-step'")
 
-        # Set episode length and discount factor for single-step and MDP version
-        if 'mdp' in method:
-            max_episode_length = TIMESTEP_IN_A_DAY
-            discount = 0.99
-        elif 'single-step' in method:
-            max_episode_length = 1
-            discount = 0
-        else:
-            raise Exception("Method name must contain 'mdp' or 'single-step'")
+    if method == 'hybrid-mdp':
+        # Create the environment
+        env = MarkovianVPPEnv(predictions=train_predictions,
+                              shift=shift,
+                              c_grid=c_grid,
+                              noise_std_dev=noise_std_dev,
+                              savepath=None)
 
-        if method == 'hybrid-mdp':
-            # Create the environment
-            env = MarkovianVPPEnv(predictions=train_predictions,
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
+        env = NormalizedEnv(env, normalize_obs=True)
+    elif method == 'hybrid-single-step':
+        # Create the environment
+        env = SingleStepVPPEnv(predictions=train_predictions,
+                               shift=shift,
+                               c_grid=c_grid,
+                               noise_std_dev=noise_std_dev,
+                               savepath=None)
+
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
+    elif method == 'rl-single-step':
+        # Create the environment
+        env = SingleStepFullRLVPP(predictions=train_predictions,
                                   shift=shift,
                                   c_grid=c_grid,
                                   noise_std_dev=noise_std_dev,
                                   savepath=None)
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
+    elif method == 'rl-mdp':
+        # Create the environment
+        env = MarkovianRlVPPEnv(predictions=train_predictions,
+                                shift=shift,
+                                c_grid=c_grid,
+                                noise_std_dev=noise_std_dev,
+                                savepath=None)
 
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
-            env = NormalizedEnv(env, normalize_obs=True)
-        elif method == 'hybrid-single-step':
-            # Create the environment
-            env = SingleStepVPPEnv(predictions=train_predictions,
-                                   shift=shift,
-                                   c_grid=c_grid,
-                                   noise_std_dev=noise_std_dev,
-                                   savepath=None)
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
 
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
-        elif method == 'rl-single-step':
-            # Create the environment
-            env = SingleStepFullRLVPP(predictions=train_predictions,
-                                      shift=shift,
-                                      c_grid=c_grid,
-                                      noise_std_dev=noise_std_dev,
-                                      savepath=None)
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
-        elif method == 'rl-mdp':
-            # Create the environment
-            env = MarkovianRlVPPEnv(predictions=train_predictions,
-                                    shift=shift,
-                                    c_grid=c_grid,
-                                    noise_std_dev=noise_std_dev,
-                                    savepath=None)
+    # TODO from here substitute with pyagents utility and classes
+    # A policy represented by a Gaussian distribution which is parameterized by a multilayer perceptron (MLP)
+    policy = GaussianMLPPolicy(env.spec)
+    obs, _ = env.reset()
 
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
+    # A value function using a MLP network.
+    baseline = ContinuousMLPBaseline(env_spec=env.spec)
 
-        # A policy represented by a Gaussian distribution which is parameterized by a multilayer perceptron (MLP)
-        policy = GaussianMLPPolicy(env.spec)
-        obs, _ = env.reset()
+    # It's called the "Local" sampler because it runs everything in the same process and thread as where
+    # it was called from.
+    sampler = LocalSampler(agents=policy,
+                           envs=env,
+                           max_episode_length=max_episode_length,
+                           is_tf_worker=True)
 
-        # A value function using a MLP network.
-        baseline = ContinuousMLPBaseline(env_spec=env.spec)
+    # Vanilla Policy Gradient
+    algo = VPG(env_spec=env.spec,
+               baseline=baseline,
+               policy=policy,
+               sampler=sampler,
+               discount=discount,
+               optimizer_args=dict(learning_rate=0.01, ))
 
-        # It's called the "Local" sampler because it runs everything in the same process and thread as where
-        # it was called from.
-        sampler = LocalSampler(agents=policy,
-                               envs=env,
-                               max_episode_length=max_episode_length,
-                               is_tf_worker=True)
-
-        # Vanilla Policy Gradient
-        algo = VPG(env_spec=env.spec,
-                   baseline=baseline,
-                   policy=policy,
-                   sampler=sampler,
-                   discount=discount,
-                   optimizer_args=dict(learning_rate=0.01, ))
-
-        trainer.setup(algo, env)
-        trainer.train(n_epochs=num_epochs, batch_size=batch_size, plot=False)
+    trainer.setup(algo, env)
+    trainer.train(n_epochs=num_epochs, batch_size=batch_size, plot=False)
 
 ########################################################################################################################
 
@@ -180,155 +176,137 @@ def test_rl_algo(log_dir: str,
     :param num_episodes: int; number of episodes.
     :return:
     """
+    # TODO use pyagents
+    # Load parameters
+    data = cloudpickle.load(open(os.path.join(log_dir, 'params.pkl'), 'rb'))
+    # Get the agent
+    algo = data['algo']
+    env = data['env']
 
-    # Create TF1 session and load all the experiments data
-    tf.compat.v1.disable_eager_execution()
-    tf.compat.v1.reset_default_graph()
-    with tf.compat.v1.Session() as _:
-        # Load parameters
-        data = cloudpickle.load(open(os.path.join(log_dir, 'params.pkl'), 'rb'))
-        # Get the agent
-        algo = data['algo']
-        env = data['env']
+    # Load data from file
+    # Check that all the required files exist
+    assert os.path.isfile(predictions_filepath), f"{predictions_filepath} does not exist"
+    assert os.path.isfile(prices_filepath), f"{prices_filepath} does not exist"
+    assert os.path.isfile(shifts_filepath), f"{shifts_filepath} does not exist"
+    predictions = pd.read_csv(predictions_filepath)
+    shift = np.load(shifts_filepath)
+    c_grid = np.load(prices_filepath)
 
-        # Load data from file
-        # Check that all the required files exist
-        assert os.path.isfile(predictions_filepath), f"{predictions_filepath} does not exist"
-        assert os.path.isfile(prices_filepath), f"{prices_filepath} does not exist"
-        assert os.path.isfile(shifts_filepath), f"{shifts_filepath} does not exist"
-        predictions = pd.read_csv(predictions_filepath)
-        shift = np.load(shifts_filepath)
-        c_grid = np.load(prices_filepath)
+    # Split between training and test
+    if isinstance(test_split, float):
+        split_index = int(len(predictions) * (1 - test_split))
+        train_predictions = predictions[:split_index]
+    elif isinstance(test_split, list):
+        split_index = test_split
+        train_predictions = predictions.iloc[split_index]
+    else:
+        raise Exception("test_split must be list of int or float")
 
-        # Split between training and test
-        if isinstance(test_split, float):
-            split_index = int(len(predictions) * (1 - test_split))
-            train_predictions = predictions[:split_index]
-        elif isinstance(test_split, list):
-            split_index = test_split
-            train_predictions = predictions.iloc[split_index]
-        else:
-            raise Exception("test_split must be list of int or float")
+    # Set episode length and discount factor for single-step and MDP version
+    if 'mdp' in method:
+        max_episode_length = TIMESTEP_IN_A_DAY
+    elif 'single-step' in method:
+        max_episode_length = 1
+    else:
+        raise Exception("Method name must contain 'mdp' or 'single-step'")
 
-        # Set episode length and discount factor for single-step and MDP version
-        if 'mdp' in method:
-            max_episode_length = TIMESTEP_IN_A_DAY
-        elif 'single-step' in method:
-            max_episode_length = 1
-        else:
-            raise Exception("Method name must contain 'mdp' or 'single-step'")
+    if method == 'hybrid-mdp':
+        # Create the environment
+        env = MarkovianVPPEnv(predictions=train_predictions,
+                              shift=shift,
+                              c_grid=c_grid,
+                              noise_std_dev=0,
+                              savepath=None)
 
-        if method == 'hybrid-mdp':
-            # Create the environment
-            env = MarkovianVPPEnv(predictions=train_predictions,
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
+        env = NormalizedEnv(env, normalize_obs=True)
+    elif method == 'hybrid-single-step':
+        # Create the environment
+        env = SingleStepVPPEnv(predictions=train_predictions,
+                               shift=shift,
+                               c_grid=c_grid,
+                               noise_std_dev=0,
+                               savepath=None)
+
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
+    elif method == 'rl-single-step':
+        # Create the environment
+        env = SingleStepFullRLVPP(predictions=train_predictions,
                                   shift=shift,
                                   c_grid=c_grid,
                                   noise_std_dev=0,
                                   savepath=None)
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
+    elif method == 'rl-mdp':
+        # Create the environment
+        env = MarkovianRlVPPEnv(predictions=train_predictions,
+                                shift=shift,
+                                c_grid=c_grid,
+                                noise_std_dev=0,
+                                savepath=None)
 
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
-            env = NormalizedEnv(env, normalize_obs=True)
-        elif method == 'hybrid-single-step':
-            # Create the environment
-            env = SingleStepVPPEnv(predictions=train_predictions,
-                                   shift=shift,
-                                   c_grid=c_grid,
-                                   noise_std_dev=0,
-                                   savepath=None)
+        # Garage wrapping of a gym environment
+        env = GymEnv(env, max_episode_length=max_episode_length)
 
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
+    # Get the policy
+    policy = algo.policy
+
+    timestamps = timestamps_headers(env.n)
+    all_rewards = []
+
+    total_reward = 0
+
+    # Loop for each episode
+    for episode in range(num_episodes):
+        last_obs, _ = env.reset()
+        done = False
+
+        episode_reward = 0
+
+        all_actions = []
+
+        # Perform an episode
+        while not done:
+            # env.render(mode='ascii')
+            _, agent_info = policy.get_action(last_obs)
+            a = agent_info['mean']
+            step = env.step(a)
+            if 'action' in step.env_info:
+                a = step.env_info['action']
+            all_actions.append(np.squeeze(a))
+
+            total_reward -= step.reward
+            episode_reward -= step.reward
+
+            if step.terminal or step.timeout:
+                break
+            last_obs = step.observation
+
+        print(f'\nTotal reward: {episode_reward}')
+        all_rewards.append(episode_reward)
+
+        if method == 'rl-mdp':
+            all_actions = np.expand_dims(all_actions, axis=0)
         elif method == 'rl-single-step':
-            # Create the environment
-            env = SingleStepFullRLVPP(predictions=train_predictions,
-                                      shift=shift,
-                                      c_grid=c_grid,
-                                      noise_std_dev=0,
-                                      savepath=None)
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
-        elif method == 'rl-mdp':
-            # Create the environment
-            env = MarkovianRlVPPEnv(predictions=train_predictions,
-                                    shift=shift,
-                                    c_grid=c_grid,
-                                    noise_std_dev=0,
-                                    savepath=None)
+            action = all_actions[0]
+            storage_in = action[:env.n]
+            storage_out = action[env.n:env.n * 2]
+            grid_in = action[env.n * 2:env.n * 3]
+            diesel_power = action[env.n * 3:]
+            all_actions = np.stack([storage_in, storage_out, grid_in, diesel_power], axis=-1)
 
-            # Garage wrapping of a gym environment
-            env = GymEnv(env, max_episode_length=max_episode_length)
+    if 'rl' in method:
+        action_save_name = 'solution'
+    else:
+        action_save_name = 'cvirt'
 
-        # Get the policy
-        policy = algo.policy
-
-        timestamps = timestamps_headers(env.n)
-        all_rewards = []
-
-        total_reward = 0
-
-        # Loop for each episode
-        for episode in range(num_episodes):
-            last_obs, _ = env.reset()
-            done = False
-
-            episode_reward = 0
-
-            all_actions = []
-
-            # Perform an episode
-            while not done:
-                # env.render(mode='ascii')
-                _, agent_info = policy.get_action(last_obs)
-                a = agent_info['mean']
-                step = env.step(a)
-                if 'action' in step.env_info:
-                    a = step.env_info['action']
-                all_actions.append(np.squeeze(a))
-
-                total_reward -= step.reward
-                episode_reward -= step.reward
-
-                if step.terminal or step.timeout:
-                    break
-                last_obs = step.observation
-
-            print(f'\nTotal reward: {episode_reward}')
-            all_rewards.append(episode_reward)
-
-            if method == 'rl-mdp':
-                all_actions = np.expand_dims(all_actions, axis=0)
-            elif method == 'rl-single-step':
-                action = all_actions[0]
-                storage_in = action[:env.n]
-                storage_out = action[env.n:env.n * 2]
-                grid_in = action[env.n * 2:env.n * 3]
-                diesel_power = action[env.n * 3:]
-                all_actions = np.stack([storage_in, storage_out, grid_in, diesel_power], axis=-1)
-
-        if 'rl' in method:
-            action_save_name = 'solution'
-        else:
-            action_save_name = 'cvirt'
-
-        # Save the agent's actions
-        all_actions = np.squeeze(all_actions)
-        np.save(os.path.join(log_dir, action_save_name), all_actions)
-
-########################################################################################################################
-
-
-@wrap_experiment
-def resume_experiment(ctxt, saved_dir):
-    """Resume a Tensorflow experiment.
-    Args:
-        ctxt (garage.experiment.ExperimentContext): The experiment
-            configuration used by Trainer to create the snapshotter.
-        saved_dir (str): Path where snapshots are saved.
-    """
-    with TFTrainer(snapshot_config=ctxt) as trainer:
-        trainer.restore(from_dir=saved_dir)
-        trainer.resume()
+    # Save the agent's actions
+    all_actions = np.squeeze(all_actions)
+    np.save(os.path.join(log_dir, action_save_name), all_actions)
+    # TODO integrate test with plotting and wandb log (see experimental branch)
 
 ########################################################################################################################
 
@@ -377,8 +355,7 @@ if __name__ == '__main__':
     if mode == 'train':
         # Training routing
         for instance_idx in indexes:
-            tf.compat.v1.disable_eager_execution()
-            tf.compat.v1.reset_default_graph()
+            # TODO update to match pyagent interface
             run = my_wrap_experiment(train_rl_algo, archive_launch_repo=False,
                                      logging_dir=os.path.join(LOG_DIR, f'{instance_idx}'))
 
@@ -400,4 +377,4 @@ if __name__ == '__main__':
                          num_episodes=1)
 
     else:
-        raise Exception(f"{mode} is not supported".format(mode))
+        raise Exception(f"{mode} is not supported")

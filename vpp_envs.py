@@ -904,7 +904,7 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         return feasible, cost, feasible_action
 
-    def _find_feasible(self, action, eps=0.5):
+    def _find_feasible(self, action, eps=0.5):  # TODO make external function
         """
         Find a feasible action using safety layer.
         :param action: numpy.array of shape (4, ); the decision variables for each timestep
