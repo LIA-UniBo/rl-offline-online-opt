@@ -980,7 +980,7 @@ class MarkovianRlVPPEnv(VPPEnv):
                 reward = MIN_REWARD
         elif self.timestep < self.n:
             done = False
-            reward = 0
+            reward = 0.
         else:
             raise Exception(f"Timestep cannot be greater than {self.n}")
 

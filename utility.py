@@ -8,37 +8,102 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 from typing import Tuple, Union, List
-from garage.experiment.experiment import ExperimentTemplate
+
+import tqdm
+
+import vpp_envs
+
+METHODS = ['hybrid-single-step', 'hybrid-mdp', 'rl-single-step', 'rl-mdp']
+
+
+########################################################################################################################
+
+def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01):
+    # set_seed(1)
+    # FIXME: the filepath should not be hardcoded
+    predictions_filepath = os.path.join('data', 'Dataset10k.csv')
+    prices_filepath = os.path.join('data', 'gmePrices.npy')
+    shifts_filepath = os.path.join('data', 'optShift.npy')
+
+    # Check that the selected method is valid
+    assert method in METHODS, f"{method} is not valid"
+    print(f'Selected method: {method}')
+
+    # Load data from file
+    # Check that all the required files exist
+    assert os.path.isfile(predictions_filepath), f"{predictions_filepath} does not exist"
+    assert os.path.isfile(prices_filepath), f"{prices_filepath} does not exist"
+    assert os.path.isfile(shifts_filepath), f"{shifts_filepath} does not exist"
+    predictions = pd.read_csv(predictions_filepath)
+    shift = np.load(shifts_filepath)
+    c_grid = np.load(prices_filepath)
+
+    # Split between training and test
+    if isinstance(instances, float):
+        split_index = int(len(predictions) * (1 - instances))
+        train_predictions = predictions[:split_index]
+    elif isinstance(instances, list):
+        train_predictions = predictions.iloc[instances]
+    else:
+        raise Exception("test_split must be list of int or float")
+
+    if method == 'hybrid-mdp':
+        # Create the environment
+        env = vpp_envs.MarkovianVPPEnv(predictions=train_predictions,
+                                       shift=shift,
+                                       c_grid=c_grid,
+                                       noise_std_dev=noise_std_dev,
+                                       savepath=None)
+    elif method == 'hybrid-single-step':
+        # Create the environment
+        env = vpp_envs.SingleStepVPPEnv(predictions=train_predictions,
+                                        shift=shift,
+                                        c_grid=c_grid,
+                                        noise_std_dev=noise_std_dev,
+                                        savepath=None)
+    elif method == 'rl-single-step':
+        # Create the environment
+        env = vpp_envs.SingleStepFullRLVPP(predictions=train_predictions,
+                                           shift=shift,
+                                           c_grid=c_grid,
+                                           noise_std_dev=noise_std_dev,
+                                           savepath=None)
+    elif method == 'rl-mdp':
+        # Create the environment
+        env = vpp_envs.MarkovianRlVPPEnv(predictions=train_predictions,
+                                         shift=shift,
+                                         c_grid=c_grid,
+                                         noise_std_dev=noise_std_dev,
+                                         savepath=None)
+    else:
+        raise Exception(f'Method name must be in {METHODS}')
+    return env
+
 
 ########################################################################################################################
 
 
-# TODO remove or update to use pyagents
-def my_wrap_experiment(function,
-                       logging_dir,
-                       *,
-                       prefix='experiment',
-                       name=None,
-                       snapshot_mode='last',
-                       snapshot_gap=1,
-                       archive_launch_repo=True,
-                       name_parameters=None,
-                       use_existing_dir=True,
-                       x_axis='TotalEnvSteps'):
-    """
-    Custom wrapper for the ExperimentTemplate class of the garage library that allows to set the log directory.
-    See the ExperimentTemplate class for more details.
-    """
-    return ExperimentTemplate(function=function,
-                              log_dir=logging_dir,
-                              prefix=prefix,
-                              name=name,
-                              snapshot_mode=snapshot_mode,
-                              snapshot_gap=snapshot_gap,
-                              archive_launch_repo=archive_launch_repo,
-                              name_parameters=name_parameters,
-                              use_existing_dir=use_existing_dir,
-                              x_axis=x_axis)
+def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96):
+    for epoch in (pbar := tqdm.trange(num_epochs, desc='TRAINING')):
+        s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
+
+        for _ in range(rollout_steps):
+            agent_out = agent.act(s_t)
+            a_t, lp_t = agent_out.actions, agent_out.logprobs
+            s_tp1, r_t, done, info = env.step(a_t[0])
+            s_tp1 = s_tp1.reshape(1, -1)
+            agent.remember(state=s_t,
+                           action=a_t,
+                           reward=np.asarray([r_t]),
+                           next_state=s_tp1,
+                           done=[done],
+                           logprob=lp_t)
+            s_t = env.reset().reshape(1, -1) if done else s_tp1
+
+        loss_dìct = agent.train(batch_size)
+        pbar.set_postfix(loss_dìct)
+    return agent
+
 
 ########################################################################################################################
 

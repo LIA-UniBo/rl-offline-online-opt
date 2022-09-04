@@ -3,6 +3,7 @@
 """
 
 import gurobipy
+import wandb
 from gurobipy import GRB
 from gurobipy import Model
 import numpy as np
@@ -485,7 +486,8 @@ def compute_real_cost(instance_idx: int,
                       virtual_costs: Union[str, np.ndarray] = None,
                       decision_variables: Union[str, np.ndarray] = None,
                       display: bool = False,
-                      savepath: str = None):
+                      savepath: str = None,
+                      wandb_log: bool = False):
     """
     Compute the cost either from a complete solution for VPP problem or by solving the hybrid offline/online
     optimization problem with virtual cost associated to the storage.
@@ -629,7 +631,7 @@ def compute_real_cost(instance_idx: int,
         table.append(storage_capacity)
 
         # Optionally, display the decision variables
-        if display:
+        if wandb_log or display:
             # print(tabulate(table, headers=timestamps, tablefmt='pretty'))
 
             axes = visualization_df.plot(subplots=True, fontsize=12, figsize=(10, 7))
@@ -638,7 +640,10 @@ def compute_real_cost(instance_idx: int,
             for axis in axes:
                 axis.legend(loc=2, prop={'size': 12})
             plt.plot()
-            plt.show()
+            if wandb_log:
+                wandb.log({'eval/chart': plt, 'eval/chart_data': wandb.Table(dataframe=visualization_df)})
+            if display:
+                plt.show()
 
         # Optionally, save the solution and the cost
         if savepath is not None:
