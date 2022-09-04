@@ -3,8 +3,10 @@
 """
     Utility methods.
 """
-
+import os
 from datetime import datetime, timedelta
+
+import gym
 import numpy as np
 import pandas as pd
 from typing import Tuple, Union, List
@@ -134,6 +136,7 @@ def min_max_scaler(starting_range: Tuple[Union[float, int]],
 
     return scaled_value
 
+
 ########################################################################################################################
 
 
@@ -151,6 +154,7 @@ def timestamps_headers(num_timeunits: int) -> List[str]:
     timestamps = ['{:02d}:{:02d}'.format(timestamp.hour, timestamp.minute) for timestamp in timestamps]
 
     return timestamps
+
 
 ########################################################################################################################
 
@@ -174,5 +178,3 @@ def instances_preprocessing(instances: pd.DataFrame) -> pd.DataFrame:
     instances['Load(kW)'] = instances['Load(kW)'].map(lambda entry: list(np.float_(entry)))
 
     return instances
-
-

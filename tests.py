@@ -19,8 +19,6 @@ from utility import timestamps_headers, make_env, METHODS, train_loop
 ########################################################################################################################
 
 
-TIMESTEP_IN_A_DAY = 96
-METHODS = ['hybrid-single-step', 'hybrid-mdp', 'rl-single-step', 'rl-mdp']
 MODES = ['train', 'test']
 TIMESTEP_IN_A_DAY = 96
 

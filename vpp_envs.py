@@ -876,7 +876,7 @@ class MarkovianRlVPPEnv(VPPEnv):
             self.timestep] * grid_in)
 
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
-        # feasible. Use safety layer to compute closest feasible action
+        # feasible. Use safety layer to compute the closest feasible action
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
             feasible_action = self._find_feasible(action)
             storage_in, storage_out, grid_in, diesel_power = feasible_action
