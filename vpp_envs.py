@@ -39,7 +39,9 @@ class VPPEnv(Env):
                  c_grid,
                  shift,
                  noise_std_dev=0.02,
-                 savepath=None):
+                 savepath=None,
+                 safety_layer=True,
+                 step_reward=True):
         """
         :param predictions: pandas.Dataframe; predicted PV and Load.
         :param c_grid: numpy.array; c_grid values.
@@ -71,7 +73,8 @@ class VPPEnv(Env):
         self.mr = random.randint(self.predictions.index.min(), self.predictions.index.max())
 
         self.savepath = savepath
-
+        self.safety_layer = safety_layer
+        self.step_reward = step_reward
         self._create_instance_variables()
 
     def _create_instance_variables(self):
@@ -764,7 +767,9 @@ class MarkovianRlVPPEnv(VPPEnv):
                  c_grid,
                  shift,
                  noise_std_dev=0.02,
-                 savepath=None):
+                 savepath=None,
+                 safety_layer=True,
+                 step_reward=True):
         """
         :param predictions: pandas.Dataframe; predicted PV and Load.
         :param c_grid: numpy.array; c_grid values.
@@ -773,7 +778,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         :param savepath: string; if not None, the gurobi models are saved to this directory.
         """
 
-        super(MarkovianRlVPPEnv, self).__init__(predictions, c_grid, shift, noise_std_dev, savepath)
+        super(MarkovianRlVPPEnv, self).__init__(predictions, c_grid, shift, noise_std_dev, savepath, safety_layer, step_reward)
 
         # Here we define the observation and action spaces
         self.observation_space = Box(low=-np.inf, high=np.inf, shape=(self.n * 3 + 1,), dtype=np.float32)
@@ -949,7 +954,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         closest = np.array([mod.getVarByName(var).X
                             for var in ('storage_in_hat', 'storage_out_hat', 'grid_in_hat', 'diesel_power_hat')],
                            dtype=np.float64)
-        closest[np.abs(closest) < 1e-10] = 0 # numerical instability
+        closest[np.abs(closest) < 1e-10] = 0  # numerical instability
         assert not mod.getVarByName('grid_out').X < 0
         return closest
 
@@ -964,7 +969,7 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         feasible, cost, actual_action = self._solve(action)
 
-        if feasible:
+        if feasible or self.safety_layer:
             self.cumulative_cost += cost
 
         observations = self._get_observations()

@@ -85,7 +85,7 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01):
 ########################################################################################################################
 
 
-def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96):
+def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96, test_every=100):
     for epoch in (pbar := tqdm.trange(num_epochs, desc='TRAINING')):
         s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
 
@@ -102,8 +102,21 @@ def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96):
                            logprob=lp_t)
             s_t = env.reset().reshape(1, -1) if done else s_tp1
 
-        loss_dìct = agent.train(batch_size)
-        pbar.set_postfix(loss_dìct)
+        loss_dict = agent.train(batch_size)
+
+        # if test_env is not None and training_step > k * test_every:
+        #     pbar.set_description('TESTING')
+        #     scores = test_agent(agent, test_env, seed=seed, n_episodes=test_rounds, render=False)
+        #     avg_score = np.mean(scores)
+        #     if avg_score > best_score:
+        #         best_score = avg_score
+        #         agent.save(ver=k)
+        #     k += 1
+        #     info['test/score'] = avg_score
+        #     pbar.set_description(f'[EVAL SCORE: {avg_score:4.0f}] TRAINING')
+
+        pbar.set_postfix(loss_dict)
+
     return agent
 
 

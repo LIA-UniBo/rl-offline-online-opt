@@ -81,6 +81,7 @@ def train_rl_algo(method: str = None,
     agent = agents.SAC(state_shape, action_shape, buffer='uniform', gamma=discount,
                        actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
                        actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
+                       tau=5e-3, target_update_period=1,
                        wandb_params=wandb_params, save_dir=save_dir, log_dict=log_dict)
 
     agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=batch_size)

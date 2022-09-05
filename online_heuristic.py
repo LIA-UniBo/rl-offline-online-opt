@@ -592,43 +592,7 @@ def compute_real_cost(instance_idx: int,
     # Check that the solution found is feasible
     if real_cost != np.inf:
 
-        # Get the decision variables
-        energy_bought = solution['Energy bought']
-        energy_sold = solution['Energy sold']
-        diesel_power = solution['Diesel power']
-        input_storage = solution['Input storage']
-        output_storage = solution['Output storage']
-        storage_capacity = solution['Storage capacity']
-
-        # Create a dataframe with all the solution variables
-        timestamps = timestamps_headers(num_timeunits=96)
-        table = list()
-
-        visualization_df = pd.DataFrame(index=timestamps)
-
-        visualization_df['Diesel power consumption'] = diesel_power.copy()
-        diesel_power.insert(0, 'p_diesel')
-        table.append(diesel_power)
-
-        visualization_df['Input to storage'] = input_storage.copy()
-        input_storage.insert(0, 'p_storage_in')
-        table.append(input_storage)
-
-        visualization_df['Output from storage'] = output_storage
-        output_storage.insert(0, 'p_storage_out')
-        table.append(output_storage)
-
-        visualization_df['Energy sold'] = energy_sold
-        energy_sold.insert(0, 'p_grid_in')
-        table.append(energy_sold)
-
-        visualization_df['Energy bought'] = energy_bought
-        energy_bought.insert(0, 'p_grid_out')
-        table.append(energy_bought)
-
-        visualization_df['Storage capacity'] = storage_capacity
-        storage_capacity.insert(0, 'cap')
-        table.append(storage_capacity)
+        visualization_df = create_dataframe(solution)
 
         # Optionally, display the decision variables
         if wandb_log or display:
@@ -649,6 +613,40 @@ def compute_real_cost(instance_idx: int,
         if savepath is not None:
             visualization_df.to_csv(os.path.join(savepath, f'{instance_idx}_solution.csv'))
     np.save(os.path.join(savepath, f'{instance_idx}_cost.npy'), real_cost)
+
+
+def create_dataframe(solution):
+    # Get the decision variables
+    energy_bought = solution['Energy bought']
+    energy_sold = solution['Energy sold']
+    diesel_power = solution['Diesel power']
+    input_storage = solution['Input storage']
+    output_storage = solution['Output storage']
+    storage_capacity = solution['Storage capacity']
+    # Create a dataframe with all the solution variables
+    timestamps = timestamps_headers(num_timeunits=96)
+    table = list()
+    visualization_df = pd.DataFrame(index=timestamps)
+    visualization_df['Diesel power consumption'] = diesel_power.copy()
+    diesel_power.insert(0, 'p_diesel')
+    table.append(diesel_power)
+    visualization_df['Input to storage'] = input_storage.copy()
+    input_storage.insert(0, 'p_storage_in')
+    table.append(input_storage)
+    visualization_df['Output from storage'] = output_storage
+    output_storage.insert(0, 'p_storage_out')
+    table.append(output_storage)
+    visualization_df['Energy sold'] = energy_sold
+    energy_sold.insert(0, 'p_grid_in')
+    table.append(energy_sold)
+    visualization_df['Energy bought'] = energy_bought
+    energy_bought.insert(0, 'p_grid_out')
+    table.append(energy_bought)
+    visualization_df['Storage capacity'] = storage_capacity
+    storage_capacity.insert(0, 'cap')
+    table.append(storage_capacity)
+    return visualization_df
+
 
 ########################################################################################################################
 
