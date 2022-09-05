@@ -48,6 +48,9 @@ class VPPEnv(Env):
         :param shift: numpy.array; shift values.
         :param noise_std_dev: float; the standard deviation of the additive gaussian noise for the realizations.
         :param savepath: string; if not None, the gurobi models are saved to this directory.
+        :param safety_layer: bool; if True, use safety layer during training.
+        :param step_reward: bool; if True, env returns step-by-step rewards, else it returns always 0s but
+            at the end of episode, where the cumulative cost is returned.
         """
 
         # Set numpy random seed to ensure reproducibility
@@ -883,7 +886,8 @@ class MarkovianRlVPPEnv(VPPEnv):
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
         # feasible. Use safety layer to compute the closest feasible action
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
-            feasible_action = self._find_feasible(action)
+            feasible = False
+            feasible_action = self._find_feasible((storage_in, storage_out, grid_in, diesel_power))
             storage_in, storage_out, grid_in, diesel_power = feasible_action
             grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
             cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
@@ -918,10 +922,6 @@ class MarkovianRlVPPEnv(VPPEnv):
         """
         # unpack action
         storage_in, storage_out, grid_in, diesel_power = action
-        storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_in)
-        storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=storage_out)
-        grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=grid_in)
-        diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, self.p_diesel_max), value=diesel_power)
 
         tilde_cons = self.shift[self.timestep] + self.tot_cons_real[self.timestep]
         tilde_ren = self.p_ren_pv_real[self.timestep]
@@ -976,17 +976,19 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         # Update the timestep
         self.timestep += 1
-
-        if self.timestep == self.n or not feasible:
+        assert self.timestep <= self.n, f"Timestep cannot be greater than {self.n}"
+        if not feasible and not self.safety_layer:
+            reward = MIN_REWARD
             done = True
+        elif self.step_reward:
+            reward = -cost
+            done = (self.timestep == self.n)
+        else:
             if self.timestep == self.n:
                 reward = -self.cumulative_cost
+                done = True
             else:
-                reward = MIN_REWARD
-        elif self.timestep < self.n:
-            done = False
-            reward = 0.
-        else:
-            raise Exception(f"Timestep cannot be greater than {self.n}")
+                reward = 0.
+                done = False
 
         return observations, reward, done, {'feasible': feasible, 'action': actual_action}

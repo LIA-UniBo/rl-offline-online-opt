@@ -86,7 +86,7 @@ def train_rl_algo(method: str = None,
 
     agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=batch_size)
     agent = train_loop(agent, env, num_epochs, batch_size)
-    agent.save('agents')
+    agent.save('_final')
 
 
 ########################################################################################################################
@@ -302,7 +302,6 @@ if __name__ == '__main__':
                       noise_std_dev=0.01,
                       wandb_params=wandb_params,
                       save_dir=os.path.join(LOG_DIR, f'{METHOD}'))
-
     elif mode == 'test':
         # Test trained methods
         for idx in indexes:
@@ -313,6 +312,5 @@ if __name__ == '__main__':
                          method=METHOD,
                          test_split=[idx],
                          num_episodes=1)
-
     else:
         raise Exception(f"{mode} is not supported")
