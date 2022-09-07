@@ -3,6 +3,8 @@
 """
     Main methods to train and test the methods.
 """
+from copy import deepcopy
+
 import gym.vector
 from pyagents.utils import get_optimizer
 
@@ -14,7 +16,7 @@ import os
 import argparse
 from typing import Union, List
 from pyagents import networks, agents
-from utility import timestamps_headers, make_env, METHODS, train_loop
+from utility import timestamps_headers, make_env, METHODS, train_loop, test_agent
 
 ########################################################################################################################
 
@@ -27,13 +29,15 @@ TIMESTEP_IN_A_DAY = 96
 
 
 def train_rl_algo(method: str = None,
+                  safety_layer: bool = False,
+                  step_reward: bool = False,
                   instances: Union[float, List[int]] = 0.25,
                   num_epochs: int = 1000,
                   noise_std_dev: Union[float, int] = 0.01,
                   batch_size: int = 100,
-                  crit_learning_rate: float = 5e-4,
-                  act_learning_rate: float = 5e-4,
-                  alpha_learning_rate: float = 5e-4,
+                  crit_learning_rate: float = 2.5e-4,
+                  act_learning_rate: float = 2.5e-4,
+                  alpha_learning_rate: float = 2.5e-4,
                   save_dir: str = None,
                   wandb_params: dict = None):
     """
@@ -46,7 +50,8 @@ def train_rl_algo(method: str = None,
     :return:
     """
 
-    env = make_env(method, instances, noise_std_dev)
+    env = make_env(method, instances, noise_std_dev, safety_layer=safety_layer, step_reward=step_reward)
+    test_env = make_env(method, instances, noise_std_dev, safety_layer=True, step_reward=step_reward)
     # Set episode length and discount factor for single-step and MDP version
     if 'mdp' in method:
         max_episode_length = TIMESTEP_IN_A_DAY
@@ -81,11 +86,12 @@ def train_rl_algo(method: str = None,
     agent = agents.SAC(state_shape, action_shape, buffer='uniform', gamma=discount,
                        actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
                        actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                       tau=5e-3, target_update_period=1,
+                       tau=5e-3, target_update_period=1, reward_scaling=0.05,
                        wandb_params=wandb_params, save_dir=save_dir, log_dict=log_dict)
 
     agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=batch_size)
-    agent = train_loop(agent, env, num_epochs, batch_size)
+    agent = train_loop(agent, env, num_epochs, batch_size, test_env=test_env)
+    test_agent(agent, test_env)
     agent.save('_final')
 
 
@@ -257,6 +263,10 @@ if __name__ == '__main__':
                              + "'rl-single-step': end-to-end RL approach which directly provides the decision "
                              + "variables for all the stages;"
                              + "'rl-mdp': this is referred to as 'rl' in the paper.")
+    parser.add_argument('-sl', '--safety-layer', action='store_true',
+                        help="If True, use safety layer to correct unfeasible actions.")
+    parser.add_argument('--step-reward', action='store_true',
+                        help="If True, env returns step-by-step costs rather than cumulative cost at end of episode.")
     parser.add_argument("--epochs", type=int, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, help="Batch size")
     parser.add_argument("--n-instances", type=int, default=1, help="Number of instances the agent is trained on")
@@ -270,6 +280,9 @@ if __name__ == '__main__':
 
     mode = args.mode
     n_instances = args.n_instances
+
+    safety_layer = args.safety_layer
+    step_reward = args.step_reward
 
     if mode == 'train':
         EPOCHS = args.epochs
@@ -286,16 +299,21 @@ if __name__ == '__main__':
     if 'wandb.key' in os.listdir():
         key = (f := open('wandb.key')).read()
         f.close()
+        tags = ['safety_layer'] if safety_layer else []
+        tags += ['step_reward'] if step_reward else []
+        tags += ['sac'] + list(map(lambda n: str(n), indexes))
         wandb_params = {'key': key,
                         'project': 'rl-online-offline-opt',
                         'entity': 'mazelions',
-                        'tags': ['sac'],
+                        'tags': tags,
                         'group': None}
     else:
         wandb_params = None
     if mode == 'train':
         # Training routing
         train_rl_algo(method=METHOD,
+                      safety_layer=safety_layer,
+                      step_reward=step_reward,
                       instances=indexes,
                       num_epochs=EPOCHS,
                       batch_size=BATCH_SIZE,

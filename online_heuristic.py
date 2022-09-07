@@ -515,7 +515,7 @@ def compute_real_cost(instance_idx: int,
     assert os.path.isfile(shifts_filepath), f"{shifts_filepath} does not exist"
 
     # Create the saving directory if does not exist
-    if not os.path.exists(savepath):
+    if savepath is not None and not os.path.exists(savepath):
         os.makedirs(savepath)
 
     # Number of timesteps in a day
@@ -559,11 +559,11 @@ def compute_real_cost(instance_idx: int,
         if isinstance(decision_variables, str):
             assert os.path.isfile(decision_variables), f"{decision_variables} does not exist"
             decision_vars = np.load(decision_variables, allow_pickle=True)
-        elif isinstance(decision_variables, np.ndarray) and virtual_costs.shape == (n * 4):
+        elif isinstance(decision_variables, np.ndarray) and decision_variables.shape == (n, 4):
             decision_vars = decision_variables
         else:
             raise Exception(f"decision_variables must be a string representing a filepath or" + \
-                            f"a numpy array of shape ({n * 4}, )")
+                            f"a numpy array of shape {n, 4}")
 
         # The virtual cost has no meaning when the complete solution is provided
         virtual_cost = -np.inf
@@ -612,7 +612,8 @@ def compute_real_cost(instance_idx: int,
         # Optionally, save the solution and the cost
         if savepath is not None:
             visualization_df.to_csv(os.path.join(savepath, f'{instance_idx}_solution.csv'))
-    np.save(os.path.join(savepath, f'{instance_idx}_cost.npy'), real_cost)
+    if savepath is not None:
+        np.save(os.path.join(savepath, f'{instance_idx}_cost.npy'), real_cost)
 
 
 def create_dataframe(solution):
@@ -625,26 +626,26 @@ def create_dataframe(solution):
     storage_capacity = solution['Storage capacity']
     # Create a dataframe with all the solution variables
     timestamps = timestamps_headers(num_timeunits=96)
-    table = list()
+    # table = list()
     visualization_df = pd.DataFrame(index=timestamps)
     visualization_df['Diesel power consumption'] = diesel_power.copy()
     diesel_power.insert(0, 'p_diesel')
-    table.append(diesel_power)
+    # table.append(diesel_power)
     visualization_df['Input to storage'] = input_storage.copy()
     input_storage.insert(0, 'p_storage_in')
-    table.append(input_storage)
+    # table.append(input_storage)
     visualization_df['Output from storage'] = output_storage
     output_storage.insert(0, 'p_storage_out')
-    table.append(output_storage)
+    # table.append(output_storage)
     visualization_df['Energy sold'] = energy_sold
     energy_sold.insert(0, 'p_grid_in')
-    table.append(energy_sold)
+    # table.append(energy_sold)
     visualization_df['Energy bought'] = energy_bought
     energy_bought.insert(0, 'p_grid_out')
-    table.append(energy_bought)
+    # table.append(energy_bought)
     visualization_df['Storage capacity'] = storage_capacity
     storage_capacity.insert(0, 'cap')
-    table.append(storage_capacity)
+    # table.append(storage_capacity)
     return visualization_df
 
 

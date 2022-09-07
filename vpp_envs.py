@@ -40,8 +40,8 @@ class VPPEnv(Env):
                  shift,
                  noise_std_dev=0.02,
                  savepath=None,
-                 safety_layer=True,
-                 step_reward=True):
+                 safety_layer=False,
+                 step_reward=False):
         """
         :param predictions: pandas.Dataframe; predicted PV and Load.
         :param c_grid: numpy.array; c_grid values.
@@ -771,8 +771,8 @@ class MarkovianRlVPPEnv(VPPEnv):
                  shift,
                  noise_std_dev=0.02,
                  savepath=None,
-                 safety_layer=True,
-                 step_reward=True):
+                 safety_layer=False,
+                 step_reward=False):
         """
         :param predictions: pandas.Dataframe; predicted PV and Load.
         :param c_grid: numpy.array; c_grid values.
@@ -841,7 +841,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         self.output_storage = []
         self.storage_capacity = []
 
-    def _solve(self, action: np.array) -> Tuple[bool, Union[int, float], np.array]:
+    def _solve(self, action: np.array) -> Tuple[bool, Union[int, float], np.array, float]:
         """
         Solve the optimization model with the greedy heuristic.
         :param action: numpy.array of shape (4, ); the decision variables for each timestep.
@@ -886,12 +886,14 @@ class MarkovianRlVPPEnv(VPPEnv):
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
         # feasible. Use safety layer to compute the closest feasible action
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
+            constraint_violation = min(grid_out, 0) + min(self.storage - storage_out, 0) + min(self.cap_max - self.storage - storage_in, 0)
             feasible = False
             feasible_action = self._find_feasible((storage_in, storage_out, grid_in, diesel_power))
             storage_in, storage_out, grid_in, diesel_power = feasible_action
             grid_out = tilde_cons - self.p_ren_pv_real[self.timestep] - storage_out - diesel_power + storage_in + grid_in
             cost = (self.c_grid[self.timestep] * grid_out + self.c_diesel * diesel_power - self.c_grid[self.timestep] * grid_in)
         else:
+            constraint_violation = 0
             feasible_action = np.array([storage_in, storage_out, grid_in, diesel_power])
 
         # Update the storage capacity
@@ -911,7 +913,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         power_balance = self.p_ren_pv_real[self.timestep] + storage_out + grid_out + diesel_power - storage_in - grid_in
         assert_almost_equal(power_balance, tilde_cons, decimal=10)
 
-        return feasible, cost, feasible_action
+        return feasible, cost, feasible_action, constraint_violation
 
     def _find_feasible(self, action, eps=0.5):  # TODO make external function
         """
@@ -948,7 +950,7 @@ class MarkovianRlVPPEnv(VPPEnv):
                ((grid_in - grid_in_hat) ** 2) + ((diesel_power - diesel_power_hat) ** 2))
         mod.setObjective(obf)
 
-        # get closest feasible action
+        # get the closest feasible action
         feasible = solve(mod)
         assert feasible
         closest = np.array([mod.getVarByName(var).X
@@ -967,7 +969,7 @@ class MarkovianRlVPPEnv(VPPEnv):
                                                     is ended, additional information.
         """
 
-        feasible, cost, actual_action = self._solve(action)
+        feasible, cost, actual_action, constraint_violation = self._solve(action)
 
         if feasible or self.safety_layer:
             self.cumulative_cost += cost
@@ -991,4 +993,6 @@ class MarkovianRlVPPEnv(VPPEnv):
                 reward = 0.
                 done = False
 
-        return observations, reward, done, {'feasible': feasible, 'action': actual_action}
+        return observations, reward, done, {'feasible': feasible,
+                                            'action': actual_action,
+                                            'constraint_violation': constraint_violation}

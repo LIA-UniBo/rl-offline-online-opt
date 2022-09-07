@@ -12,15 +12,19 @@ import pandas as pd
 from typing import Tuple, Union, List
 
 import tqdm
+import wandb
 
 import vpp_envs
+import online_heuristic
 
 METHODS = ['hybrid-single-step', 'hybrid-mdp', 'rl-single-step', 'rl-mdp']
 
 
 ########################################################################################################################
 
-def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01):
+def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
+             safety_layer: bool = False,
+             step_reward: bool = False):
     # set_seed(1)
     # FIXME: the filepath should not be hardcoded
     predictions_filepath = os.path.join('data', 'Dataset10k.csv')
@@ -76,7 +80,9 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01):
                                          shift=shift,
                                          c_grid=c_grid,
                                          noise_std_dev=noise_std_dev,
-                                         savepath=None)
+                                         savepath=None,
+                                         safety_layer=safety_layer,
+                                         step_reward=step_reward)
     else:
         raise Exception(f'Method name must be in {METHODS}')
     return env
@@ -85,7 +91,9 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01):
 ########################################################################################################################
 
 
-def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96, test_every=100):
+def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96, test_every=100, test_env=None):
+    k = 1
+    best_score = float('-inf')
     for epoch in (pbar := tqdm.trange(num_epochs, desc='TRAINING')):
         s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
 
@@ -103,21 +111,52 @@ def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96, test_every=
             s_t = env.reset().reshape(1, -1) if done else s_tp1
 
         loss_dict = agent.train(batch_size)
-
-        # if test_env is not None and training_step > k * test_every:
-        #     pbar.set_description('TESTING')
-        #     scores = test_agent(agent, test_env, seed=seed, n_episodes=test_rounds, render=False)
-        #     avg_score = np.mean(scores)
-        #     if avg_score > best_score:
-        #         best_score = avg_score
-        #         agent.save(ver=k)
-        #     k += 1
-        #     info['test/score'] = avg_score
-        #     pbar.set_description(f'[EVAL SCORE: {avg_score:4.0f}] TRAINING')
-
         pbar.set_postfix(loss_dict)
 
+        if test_env is not None and epoch > k * test_every:
+            pbar.set_description('TESTING')
+            score = test_agent(agent, test_env, render_plots=False)
+            if score > best_score:
+                best_score = score
+                agent.save(ver=k)
+            k += 1
+            loss_dict['test/score'] = score
+            wandb.log({'test/score': score})
+            pbar.set_description(f'[EVAL SCORE: {score:4.0f}] TRAINING')
+
     return agent
+
+
+########################################################################################################################
+
+def test_agent(agent, test_env, render_plots=True, save_path=None):
+    done = False
+    s_t = test_env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
+    score = 0
+    all_actions = []
+
+    # Perform an episode
+    while not done:
+        agent_out = agent.act(s_t)
+        a_t, lp_t = agent_out.actions, agent_out.logprobs
+        s_tp1, r_t, done, info = test_env.step(a_t[0])
+        if 'action' in info:
+            a_t = info['action']
+        s_tp1 = s_tp1.reshape(1, -1)
+        all_actions.append(np.squeeze(a_t))
+        score += r_t
+        s_t = test_env.reset().reshape(1, -1) if done else s_tp1
+
+    if render_plots:
+        online_heuristic.compute_real_cost(instance_idx=test_env.mr,
+                                           predictions_filepath=os.path.join('data', 'Dataset10k.csv'),
+                                           shifts_filepath=os.path.join('data', 'optShift.npy'),
+                                           prices_filepath=os.path.join('data', 'gmePrices.npy'),
+                                           decision_variables=np.array(all_actions),
+                                           display=False,
+                                           savepath=save_path,
+                                           wandb_log=agent.is_logging)
+    return score
 
 
 ########################################################################################################################
