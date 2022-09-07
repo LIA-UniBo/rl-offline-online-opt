@@ -85,18 +85,24 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
                                          step_reward=step_reward)
     else:
         raise Exception(f'Method name must be in {METHODS}')
+    env = gym.wrappers.RecordEpisodeStatistics(env)
     return env
 
 
 ########################################################################################################################
 
 
-def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96, test_every=100, test_env=None):
+def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=100, test_env=None):
     k = 1
-    best_score = float('-inf')
-    for epoch in (pbar := tqdm.trange(num_epochs, desc='TRAINING')):
-        s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
+    # Test untrained agent
+    best_score, sl_usage = test_agent(agent, test_env, render_plots=False)
+    wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage})
 
+    # Main loop
+    s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
+    for epoch in (pbar := tqdm.trange(num_epochs, desc='TRAINING')):
+
+        # Env interactions
         for _ in range(rollout_steps):
             agent_out = agent.act(s_t)
             a_t, lp_t = agent_out.actions, agent_out.logprobs
@@ -108,20 +114,23 @@ def train_loop(agent, env, num_epochs, batch_size, rollout_steps=96, test_every=
                            next_state=s_tp1,
                            done=[done],
                            logprob=lp_t)
+            if 'episode' in info:
+                wandb.log({'train/score': info['episode']['r'], 'train/length': info['episode']['l']})
             s_t = env.reset().reshape(1, -1) if done else s_tp1
-
+        # Training
         loss_dict = agent.train(batch_size)
         pbar.set_postfix(loss_dict)
 
+        # Testing
         if test_env is not None and epoch > k * test_every:
             pbar.set_description('TESTING')
-            score = test_agent(agent, test_env, render_plots=False)
+            score, sl_usage = test_agent(agent, test_env, render_plots=False)
             if score > best_score:
                 best_score = score
                 agent.save(ver=k)
             k += 1
             loss_dict['test/score'] = score
-            wandb.log({'test/score': score})
+            wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage})
             pbar.set_description(f'[EVAL SCORE: {score:4.0f}] TRAINING')
 
     return agent
@@ -156,7 +165,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
                                            display=False,
                                            savepath=save_path,
                                            wandb_log=agent.is_logging)
-    return score
+    return score, info['sl_usage']
 
 
 ########################################################################################################################

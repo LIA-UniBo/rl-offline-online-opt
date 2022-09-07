@@ -14,6 +14,7 @@ import pandas as pd
 import cloudpickle
 import os
 import argparse
+import gin
 from typing import Union, List
 from pyagents import networks, agents
 from utility import timestamps_headers, make_env, METHODS, train_loop, test_agent
@@ -38,7 +39,7 @@ def train_rl_algo(method: str = None,
                   crit_learning_rate: float = 2.5e-4,
                   act_learning_rate: float = 2.5e-4,
                   alpha_learning_rate: float = 2.5e-4,
-                  save_dir: str = None,
+                  log_dir: str = None,
                   wandb_params: dict = None):
     """
     Training routing.
@@ -86,10 +87,10 @@ def train_rl_algo(method: str = None,
     agent = agents.SAC(state_shape, action_shape, buffer='uniform', gamma=discount,
                        actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
                        actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                       tau=5e-3, target_update_period=1, reward_scaling=0.05,
-                       wandb_params=wandb_params, save_dir=save_dir, log_dict=log_dict)
+                       tau=5e-3, target_update_period=1, reward_scaling=0.1,
+                       wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
-    agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=batch_size)
+    agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=10000)
     agent = train_loop(agent, env, num_epochs, batch_size, test_env=test_env)
     test_agent(agent, test_env)
     agent.save('_final')
@@ -273,6 +274,7 @@ if __name__ == '__main__':
     parser.add_argument("--mode", type=str, choices=MODES, required=True,
                         help="'train': if you want to train a model from scratch;"
                              + "'test': if you want to test an existing model.")
+    parser.add_argument('--gin', default=None, help='(Optional) path to .gin config file.')
     args = parser.parse_args()
 
     LOG_DIR = args.logdir
@@ -306,9 +308,11 @@ if __name__ == '__main__':
                         'project': 'rl-online-offline-opt',
                         'entity': 'mazelions',
                         'tags': tags,
-                        'group': None}
+                        'group': '-'.join(map(lambda n: str(n), indexes))}
     else:
         wandb_params = None
+    if args.gin is not None:
+        gin.parse_config_file(args.gin)
     if mode == 'train':
         # Training routing
         train_rl_algo(method=METHOD,
@@ -319,7 +323,7 @@ if __name__ == '__main__':
                       batch_size=BATCH_SIZE,
                       noise_std_dev=0.01,
                       wandb_params=wandb_params,
-                      save_dir=os.path.join(LOG_DIR, f'{METHOD}'))
+                      log_dir=LOG_DIR)
     elif mode == 'test':
         # Test trained methods
         for idx in indexes:

@@ -18,7 +18,7 @@ from typing import Tuple, List, Union
 
 ########################################################################################################################
 
-MIN_REWARD = -10000
+MIN_REWARD = -5000
 
 
 ########################################################################################################################
@@ -58,6 +58,9 @@ class VPPEnv(Env):
 
         # Number of timesteps in one day
         self.n = 96
+
+        # Counter of safety layer usage
+        self.sl_counter = 0
 
         # Standard deviation of the additive gaussian noise
         self.noise_std_dev = noise_std_dev
@@ -103,6 +106,9 @@ class VPPEnv(Env):
         # The real Load for the current instance is computed adding noise to the predictions
         noise = np.random.normal(0, self.noise_std_dev, self.n)
         self.tot_cons_real = self.tot_cons_pred + self.tot_cons_pred * noise
+
+        # Reset SL counter
+        self.sl_counter = 0
 
     def step(self, action: np.array):
         """
@@ -922,6 +928,8 @@ class MarkovianRlVPPEnv(VPPEnv):
         :param eps: float, epsilon used to limit ranges (in both direction) for numerical stability
         :return: numpy.array of shape (4, ); closest feasible action
         """
+        self.sl_counter += 1
+
         # unpack action
         storage_in, storage_out, grid_in, diesel_power = action
 
@@ -995,4 +1003,5 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         return observations, reward, done, {'feasible': feasible,
                                             'action': actual_action,
+                                            'sl_usage': self.sl_counter / self.timestep,
                                             'constraint_violation': constraint_violation}
