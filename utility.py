@@ -92,7 +92,7 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
 ########################################################################################################################
 
 
-def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=100, test_env=None):
+def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=200, test_env=None):
     k = 1
     # Test untrained agent
     best_score, sl_usage = test_agent(agent, test_env, render_plots=False)
@@ -108,12 +108,22 @@ def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=1
             a_t, lp_t = agent_out.actions, agent_out.logprobs
             s_tp1, r_t, done, info = env.step(a_t[0])
             s_tp1 = s_tp1.reshape(1, -1)
+            feasible_action = env.rescale(info['action'], to_network_range=True).reshape(1, -1)
             agent.remember(state=s_t,
-                           action=a_t,
+                           action=feasible_action,
                            reward=np.asarray([r_t]),
                            next_state=s_tp1,
                            done=[done],
                            logprob=lp_t)
+            # also store unfeasible action in buffer
+            if not info['feasible'] and False:  # TODO check if useful
+                # FIXME agents without SL save the same memory twice
+                agent.remember(state=s_t,
+                               action=a_t,
+                               reward=np.asarray([r_t]) * 2.,
+                               next_state=s_tp1,
+                               done=[True],
+                               logprob=lp_t)
             if 'episode' in info:
                 wandb.log({'train/score': info['episode']['r'], 'train/length': info['episode']['l']})
             s_t = env.reset().reshape(1, -1) if done else s_tp1

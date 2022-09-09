@@ -605,6 +605,7 @@ def compute_real_cost(instance_idx: int,
                 axis.legend(loc=2, prop={'size': 12})
             plt.plot()
             if wandb_log:
+                visualization_df['Timestep'] = list(range(len(visualization_df)))
                 wandb.log({'eval/chart': plt, 'eval/chart_data': wandb.Table(dataframe=visualization_df)})
             if display:
                 plt.show()

@@ -18,16 +18,14 @@ from typing import Tuple, List, Union
 
 ########################################################################################################################
 
-MIN_REWARD = -5000
-
-
-########################################################################################################################
-
 
 class VPPEnv(Env):
     """
     Gym environment for the VPP optimization model.
     """
+
+    # Reward for unfeasible actions
+    MIN_REWARD = -100
 
     # This is a gym.Env variable that is required by garage for rendering
     metadata = {
@@ -328,7 +326,7 @@ class SingleStepVPPEnv(VPPEnv):
         models, feasible = self._solve(action)
 
         if not feasible:
-            reward = MIN_REWARD
+            reward = self.MIN_REWARD
         else:
             # The reward is the negative real cost
             reward = -self._compute_real_cost(models)
@@ -517,7 +515,7 @@ class MarkovianVPPEnv(VPPEnv):
         models, feasible = self._solve(action)
 
         if not feasible:
-            reward = MIN_REWARD
+            reward = self.MIN_REWARD
         else:
             # The reward is the negative real cost
             reward = -self._compute_real_cost(models)
@@ -871,10 +869,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         # action[3] -> power generated from the diesel source
 
         # Rescale the actions in their feasible ranges
-        storage_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=action[0])
-        storage_out = min_max_scaler(starting_range=(-1, 1), new_range=(0, 200), value=action[1])
-        grid_in = min_max_scaler(starting_range=(-1, 1), new_range=(0, 600), value=action[2])
-        diesel_power = min_max_scaler(starting_range=(-1, 1), new_range=(0, self.p_diesel_max), value=action[3])
+        storage_in, storage_out, grid_in, diesel_power = self.rescale(action)
 
         # Keep track if the solution is feasible
         feasible = True
@@ -968,6 +963,26 @@ class MarkovianRlVPPEnv(VPPEnv):
         assert not mod.getVarByName('grid_out').X < 0
         return closest
 
+    def rescale(self, action, to_network_range=False):
+        """Public method for rescaling actions, either from network range (e.g. (-1, 1)) to env range or vice versa.
+        Args:
+            action: np.array, action to be rescaled.
+            to_network_range: (Optional) if True, rescales from env range to network range; otherwise performs the opposite
+                rescaling. Defaults to False.
+        """
+        net_lb = np.full(4, -1.)
+        net_ub = np.ones(4)
+        env_lb = np.zeros(4)
+        env_ub = np.array([200, 200, 600, self.p_diesel_max])
+
+        if to_network_range:
+            std = (action - env_lb) / (env_ub - env_lb)
+            action = std * (net_ub - net_lb) + net_lb
+        else:
+            std = (action - net_lb) / (net_ub - net_lb)
+            action = std * (env_ub - env_lb) + env_lb
+        return action
+
     def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
         This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
@@ -988,7 +1003,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         self.timestep += 1
         assert self.timestep <= self.n, f"Timestep cannot be greater than {self.n}"
         if not feasible and not self.safety_layer:
-            reward = MIN_REWARD
+            reward = self.MIN_REWARD
             done = True
         elif self.step_reward:
             reward = -cost

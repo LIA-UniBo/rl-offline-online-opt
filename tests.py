@@ -15,6 +15,7 @@ import cloudpickle
 import os
 import argparse
 import gin
+import tensorflow as tf
 from typing import Union, List
 from pyagents import networks, agents
 from utility import timestamps_headers, make_env, METHODS, train_loop, test_agent
@@ -28,7 +29,7 @@ TIMESTEP_IN_A_DAY = 96
 
 ########################################################################################################################
 
-
+@gin.configurable
 def train_rl_algo(method: str = None,
                   safety_layer: bool = False,
                   step_reward: bool = False,
@@ -36,6 +37,7 @@ def train_rl_algo(method: str = None,
                   num_epochs: int = 1000,
                   noise_std_dev: Union[float, int] = 0.01,
                   batch_size: int = 100,
+                  schedule: bool = False,
                   crit_learning_rate: float = 2.5e-4,
                   act_learning_rate: float = 2.5e-4,
                   alpha_learning_rate: float = 2.5e-4,
@@ -74,23 +76,34 @@ def train_rl_algo(method: str = None,
     q1_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
     q2_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
 
+    log_dict = dict(act_learning_rate=act_learning_rate,
+                    crit_learning_rate=crit_learning_rate,
+                    alpha_learning_rate=alpha_learning_rate,
+                    num_epochs=num_epochs, batch_size=batch_size,
+                    schedule=schedule)
+
+    if schedule:
+        act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
+                                                                          num_epochs,
+                                                                          0.)
+        crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate,
+                                                                           num_epochs,
+                                                                           0.)
+        alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
+                                                                            num_epochs,
+                                                                            0.)
     a_opt = get_optimizer(learning_rate=act_learning_rate)
     c1_opt = get_optimizer(learning_rate=crit_learning_rate)
     c2_opt = get_optimizer(learning_rate=crit_learning_rate)
     alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
 
-    log_dict = dict(act_learning_rate=act_learning_rate,
-                    crit_learning_rate=crit_learning_rate,
-                    alpha_learning_rate=alpha_learning_rate,
-                    num_epochs=num_epochs, batch_size=batch_size)
-
     agent = agents.SAC(state_shape, action_shape, buffer='uniform', gamma=discount,
                        actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
                        actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                       tau=5e-3, target_update_period=1, reward_scaling=0.1,
+                       tau=5e-3, target_update_period=1, reward_scaling=1.0,
                        wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
-    agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=10000)
+    agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=batch_size)
     agent = train_loop(agent, env, num_epochs, batch_size, test_env=test_env)
     test_agent(agent, test_env)
     agent.save('_final')
