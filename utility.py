@@ -94,7 +94,7 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
 
 def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=200, test_env=None):
     k = 1
-    # Test untrained agent
+    # Test untrained agent.py
     best_score, sl_usage = test_agent(agent, test_env, render_plots=False)
     wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage})
 

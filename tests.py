@@ -8,6 +8,7 @@ from copy import deepcopy
 import gym.vector
 from pyagents.utils import get_optimizer
 
+from agent import SacMod
 from vpp_envs import SingleStepVPPEnv, MarkovianVPPEnv, SingleStepFullRLVPP, MarkovianRlVPPEnv
 import numpy as np
 import pandas as pd
@@ -97,13 +98,13 @@ def train_rl_algo(method: str = None,
     c2_opt = get_optimizer(learning_rate=crit_learning_rate)
     alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
 
-    agent = agents.SAC(state_shape, action_shape, buffer='uniform', gamma=discount,
-                       actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
-                       actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                       tau=5e-3, target_update_period=1, reward_scaling=1.0,
-                       wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
+    agent = SacMod(state_shape, action_shape, buffer='uniform', gamma=discount,
+                   actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
+                   actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
+                   tau=5e-3, target_update_period=1, reward_scaling=1.0,
+                   wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
-    agent.init(envs=gym.vector.SyncVectorEnv([lambda: env]), min_memories=batch_size)
+    agent.init(env=env, min_memories=batch_size)
     agent = train_loop(agent, env, num_epochs, batch_size, test_env=test_env)
     test_agent(agent, test_env)
     agent.save('_final')
@@ -120,7 +121,7 @@ def test_rl_algo(log_dir: str,
                  test_split: Union[float, List[int]],
                  num_episodes: int = 100):
     """
-    Test a trained agent.
+    Test a trained agent.py.
     :param log_dir: string; path where training information are saved to.
     :param predictions_filepath: string; where instances are loaded from.
     :param shifts_filepath: string; where optimal shifts are loaded from.
@@ -133,7 +134,7 @@ def test_rl_algo(log_dir: str,
     # TODO use pyagents
     # Load parameters
     data = cloudpickle.load(open(os.path.join(log_dir, 'params.pkl'), 'rb'))
-    # Get the agent
+    # Get the agent.py
     algo = data['algo']
     env = data['env']
 
@@ -257,7 +258,7 @@ def test_rl_algo(log_dir: str,
     else:
         action_save_name = 'cvirt'
 
-    # Save the agent's actions
+    # Save the agent.py's actions
     all_actions = np.squeeze(all_actions)
     np.save(os.path.join(log_dir, action_save_name), all_actions)
     # TODO integrate test with plotting and wandb log (see experimental branch)
@@ -283,7 +284,7 @@ if __name__ == '__main__':
                         help="If True, env returns step-by-step costs rather than cumulative cost at end of episode.")
     parser.add_argument("--epochs", type=int, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, help="Batch size")
-    parser.add_argument("--n-instances", type=int, default=1, help="Number of instances the agent is trained on")
+    parser.add_argument("--n-instances", type=int, default=1, help="Number of instances the agent.py is trained on")
     parser.add_argument("--mode", type=str, choices=MODES, required=True,
                         help="'train': if you want to train a model from scratch;"
                              + "'test': if you want to test an existing model.")

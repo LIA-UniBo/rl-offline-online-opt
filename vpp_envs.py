@@ -111,7 +111,7 @@ class VPPEnv(Env):
     def step(self, action: np.array):
         """
         Step function of the Gym environment.
-        :param action: numpy.array; agent's action.
+        :param action: numpy.array; agent.py's action.
         :return:
         """
         raise NotImplementedError()
@@ -315,7 +315,7 @@ class SingleStepVPPEnv(VPPEnv):
 
     def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
-        This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
+        This is a step performed in the environment: the virtual costs are set by the agent.py and then the total cost
         (the reward) is computed.
         :param action: numpy.array of shape (num_timesteps, ); virtual costs for each timestep.
         :return: numpy.array, float, boolean, dict; the observations, the reward, a boolean that is True if the episode
@@ -504,7 +504,7 @@ class MarkovianVPPEnv(VPPEnv):
 
     def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
-        This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
+        This is a step performed in the environment: the virtual costs are set by the agent.py and then the total cost
         (the reward) is computed.
         :param action: numpy.array of shape (num_timesteps, ); virtual costs for each timestep.
         :return: numpy.array, float, boolean, dict; the observations, the reward, a boolean that is True if the episode
@@ -736,7 +736,7 @@ class SingleStepFullRLVPP(VPPEnv):
 
     def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
-        This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
+        This is a step performed in the environment: the virtual costs are set by the agent.py and then the total cost
         (the reward) is computed.
         :param action: numpy.array of shape (num_timesteps, ); virtual costs for each timestep.
         :return: numpy.array, float, boolean, dict; the observations, the reward, a boolean that is True if the episode
@@ -985,7 +985,7 @@ class MarkovianRlVPPEnv(VPPEnv):
 
     def step(self, action: np.array) -> Tuple[np.array, Union[float, int], bool, dict]:
         """
-        This is a step performed in the environment: the virtual costs are set by the agent and then the total cost
+        This is a step performed in the environment: the virtual costs are set by the agent.py and then the total cost
         (the reward) is computed.
         :param action: numpy.array of shape (num_timesteps, ); virtual costs for each timestep.
         :return: numpy.array, float, boolean, dict; the observations, the reward, a boolean that is True if the episode
