@@ -92,15 +92,16 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
 ########################################################################################################################
 
 
-def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=200, test_env=None):
+def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, train_steps=1, test_every=200, test_env=None):
     k = 1
-    # Test untrained agent.py
-    best_score, sl_usage = test_agent(agent, test_env, render_plots=False)
-    wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage})
+    episode = 0
+    # Test untrained agent
+    best_score, sl_usage, l2_dists = test_agent(agent, test_env, render_plots=False)
+    wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
 
     # Main loop
     s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
-    for epoch in (pbar := tqdm.trange(num_epochs, desc='TRAINING')):
+    for epoch in (pbar := tqdm.trange(0, num_epochs, train_steps, desc='TRAINING')):
 
         # Env interactions
         for _ in range(rollout_steps):
@@ -122,25 +123,29 @@ def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, test_every=2
                                action=a_t,
                                reward=np.asarray([r_t]) * 2.,
                                next_state=s_tp1,
-                               done=[True],
+                               done=[done],
                                logprob=lp_t)
             if 'episode' in info:
-                wandb.log({'train/score': info['episode']['r'], 'train/length': info['episode']['l']})
+                episode += 1
+                wandb.log({'episode': episode,
+                           'train/score': info['episode']['r'],
+                           'train/length': info['episode']['l']})
             s_t = env.reset().reshape(1, -1) if done else s_tp1
         # Training
-        loss_dict = agent.train(batch_size)
-        pbar.set_postfix(loss_dict)
+        for _ in range(train_steps):
+            loss_dict = agent.train(batch_size)
+            pbar.set_postfix(loss_dict)
 
         # Testing
         if test_env is not None and epoch > k * test_every:
             pbar.set_description('TESTING')
-            score, sl_usage = test_agent(agent, test_env, render_plots=False)
+            score, sl_usage, l2_dists = test_agent(agent, test_env, render_plots=False)
             if score > best_score:
                 best_score = score
                 agent.save(ver=k)
             k += 1
             loss_dict['test/score'] = score
-            wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage})
+            wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
             pbar.set_description(f'[EVAL SCORE: {score:4.0f}] TRAINING')
 
     return agent
@@ -153,6 +158,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
     s_t = test_env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
     score = 0
     all_actions = []
+    l2_dists = []
 
     # Perform an episode
     while not done:
@@ -163,6 +169,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
             a_t = info['action']
         s_tp1 = s_tp1.reshape(1, -1)
         all_actions.append(np.squeeze(a_t))
+        l2_dists.append(info['actions_l2_dist'])
         score += r_t
         s_t = test_env.reset().reshape(1, -1) if done else s_tp1
 
@@ -175,7 +182,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
                                            display=False,
                                            savepath=save_path,
                                            wandb_log=agent.is_logging)
-    return score, info['sl_usage']
+    return score, info['sl_usage'], np.mean(l2_dists)
 
 
 ########################################################################################################################

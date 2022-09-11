@@ -920,7 +920,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         """
         Find a feasible action using safety layer.
         :param action: numpy.array of shape (4, ); the decision variables for each timestep
-        :param eps: float, epsilon used to limit ranges (in both direction) for numerical stability
+        :param eps: float, epsilon used to limit ranges (in both directions) for numerical stability
         :return: numpy.array of shape (4, ); closest feasible action
         """
         self.sl_counter += 1
@@ -1018,5 +1018,6 @@ class MarkovianRlVPPEnv(VPPEnv):
 
         return observations, reward, done, {'feasible': feasible,
                                             'action': actual_action,
+                                            'actions_l2_dist': np.sum((self.rescale(action) - actual_action) ** 2),
                                             'sl_usage': self.sl_counter / self.timestep,
                                             'constraint_violation': constraint_violation}

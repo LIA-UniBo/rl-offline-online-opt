@@ -39,9 +39,11 @@ def train_rl_algo(method: str = None,
                   noise_std_dev: Union[float, int] = 0.01,
                   batch_size: int = 100,
                   schedule: bool = False,
-                  crit_learning_rate: float = 2.5e-4,
-                  act_learning_rate: float = 2.5e-4,
-                  alpha_learning_rate: float = 2.5e-4,
+                  crit_learning_rate: float = 7e-4,
+                  act_learning_rate: float = 7e-4,
+                  alpha_learning_rate: float = 7e-4,
+                  rollout_steps: int = 1,
+                  train_steps: int = 1,
                   log_dir: str = None,
                   wandb_params: dict = None):
     """
@@ -81,7 +83,8 @@ def train_rl_algo(method: str = None,
                     crit_learning_rate=crit_learning_rate,
                     alpha_learning_rate=alpha_learning_rate,
                     num_epochs=num_epochs, batch_size=batch_size,
-                    schedule=schedule)
+                    schedule=schedule, rollout_steps=rollout_steps,
+                    train_steps=train_steps)
 
     if schedule:
         act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
@@ -101,11 +104,11 @@ def train_rl_algo(method: str = None,
     agent = SacMod(state_shape, action_shape, buffer='uniform', gamma=discount,
                    actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
                    actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                   tau=5e-3, target_update_period=1, reward_scaling=1.0,
+                   target_update_period=1, reward_scaling=1.0,
                    wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
-    agent.init(env=env, min_memories=batch_size)
-    agent = train_loop(agent, env, num_epochs, batch_size, test_env=test_env)
+    agent.init(env=env, min_memories=2000)
+    agent = train_loop(agent, env, num_epochs, batch_size, rollout_steps, train_steps, test_env=test_env)
     test_agent(agent, test_env)
     agent.save('_final')
 
@@ -121,7 +124,7 @@ def test_rl_algo(log_dir: str,
                  test_split: Union[float, List[int]],
                  num_episodes: int = 100):
     """
-    Test a trained agent.py.
+    Test a trained agent.
     :param log_dir: string; path where training information are saved to.
     :param predictions_filepath: string; where instances are loaded from.
     :param shifts_filepath: string; where optimal shifts are loaded from.
@@ -134,7 +137,7 @@ def test_rl_algo(log_dir: str,
     # TODO use pyagents
     # Load parameters
     data = cloudpickle.load(open(os.path.join(log_dir, 'params.pkl'), 'rb'))
-    # Get the agent.py
+    # Get the agent
     algo = data['algo']
     env = data['env']
 
@@ -258,7 +261,7 @@ def test_rl_algo(log_dir: str,
     else:
         action_save_name = 'cvirt'
 
-    # Save the agent.py's actions
+    # Save the agent's actions
     all_actions = np.squeeze(all_actions)
     np.save(os.path.join(log_dir, action_save_name), all_actions)
     # TODO integrate test with plotting and wandb log (see experimental branch)
@@ -284,7 +287,7 @@ if __name__ == '__main__':
                         help="If True, env returns step-by-step costs rather than cumulative cost at end of episode.")
     parser.add_argument("--epochs", type=int, help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, help="Batch size")
-    parser.add_argument("--n-instances", type=int, default=1, help="Number of instances the agent.py is trained on")
+    parser.add_argument("--n-instances", type=int, default=1, help="Number of instances the agent is trained on")
     parser.add_argument("--mode", type=str, choices=MODES, required=True,
                         help="'train': if you want to train a model from scratch;"
                              + "'test': if you want to test an existing model.")
