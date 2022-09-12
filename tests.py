@@ -272,32 +272,6 @@ def test_rl_algo(log_dir: str,
 ########################################################################################################################
 
 
-def launch():
-    if mode == 'train':
-        # Training routing
-        train_rl_algo(method=METHOD,
-                      safety_layer=safety_layer,
-                      step_reward=step_reward,
-                      instances=indexes,
-                      num_epochs=EPOCHS,
-                      batch_size=BATCH_SIZE,
-                      noise_std_dev=0.01,
-                      wandb_params=wandb_params,
-                      log_dir=LOG_DIR)
-    elif mode == 'test':
-        # Test trained methods
-        for idx in indexes:
-            test_rl_algo(log_dir=os.path.join(LOG_DIR, f'{idx}'),
-                         predictions_filepath=os.path.join('data', 'Dataset10k.csv'),
-                         shifts_filepath=os.path.join('data', 'optShift.npy'),
-                         prices_filepath=os.path.join('data', 'gmePrices.npy'),
-                         method=METHOD,
-                         test_split=[idx],
-                         num_episodes=1)
-    else:
-        raise Exception(f"{mode} is not supported")
-
-
 if __name__ == '__main__':
 
     # NOTE: you should set the logging directory and the method
@@ -320,7 +294,6 @@ if __name__ == '__main__':
                         help="'train': if you want to train a model from scratch;"
                              + "'test': if you want to test an existing model.")
     parser.add_argument('--gin', default=None, help='(Optional) path to .gin config file.')
-    parser.add_argument('--gin-dir', default=None, help='(Optional) path to directory with .gin config file(s).')
     args = parser.parse_args()
 
     LOG_DIR = args.logdir
@@ -357,14 +330,28 @@ if __name__ == '__main__':
                         'group': '-'.join(map(lambda n: str(n), indexes))}
     else:
         wandb_params = None
-
     if args.gin is not None:
         gin.parse_config_file(args.gin)
-        launch()
-    elif args.gin_dir is not None:
-        listdir = sorted(os.listdir(args.config_dir))
-        for cfg_file in listdir:
-            gin.parse_config_file(os.path.join(args.config_dir, cfg_file))
-            launch()
+    if mode == 'train':
+        # Training routing
+        train_rl_algo(method=METHOD,
+                      safety_layer=safety_layer,
+                      step_reward=step_reward,
+                      instances=indexes,
+                      num_epochs=EPOCHS,
+                      batch_size=BATCH_SIZE,
+                      noise_std_dev=0.01,
+                      wandb_params=wandb_params,
+                      log_dir=LOG_DIR)
+    elif mode == 'test':
+        # Test trained methods
+        for idx in indexes:
+            test_rl_algo(log_dir=os.path.join(LOG_DIR, f'{idx}'),
+                         predictions_filepath=os.path.join('data', 'Dataset10k.csv'),
+                         shifts_filepath=os.path.join('data', 'optShift.npy'),
+                         prices_filepath=os.path.join('data', 'gmePrices.npy'),
+                         method=METHOD,
+                         test_split=[idx],
+                         num_episodes=1)
     else:
-        launch()
+        raise Exception(f"{mode} is not supported")
