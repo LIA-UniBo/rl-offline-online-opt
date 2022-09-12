@@ -92,7 +92,8 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
 ########################################################################################################################
 
 
-def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, train_steps=1, test_every=200, test_env=None):
+def train_loop(agent, env, num_epochs, batch_size,
+               rollout_steps=1, train_steps=1, test_every=200, store_unfeasible=False, test_env=None):
     k = 1
     episode = 0
     # Test untrained agent
@@ -117,11 +118,11 @@ def train_loop(agent, env, num_epochs, batch_size, rollout_steps=1, train_steps=
                            done=[done],
                            logprob=lp_t)
             # also store unfeasible action in buffer
-            if not info['feasible'] and False:  # TODO check if useful
+            if not info['feasible'] and store_unfeasible:  # TODO check if useful
                 # FIXME agents without SL save the same memory twice
                 agent.remember(state=s_t,
                                action=a_t,
-                               reward=np.asarray([r_t]) * 2.,
+                               reward=np.asarray([r_t - info['actions_l2_dist']/10.]),
                                next_state=s_tp1,
                                done=[done],
                                logprob=lp_t)

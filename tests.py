@@ -45,7 +45,8 @@ def train_rl_algo(method: str = None,
                   rollout_steps: int = 1,
                   train_steps: int = 1,
                   log_dir: str = None,
-                  wandb_params: dict = None):
+                  wandb_params: dict = None,
+                  store_unfeasible: bool = False):
     """
     Training routing.
     :param method: string; choose among one of the available methods.
@@ -83,8 +84,8 @@ def train_rl_algo(method: str = None,
                     crit_learning_rate=crit_learning_rate,
                     alpha_learning_rate=alpha_learning_rate,
                     num_epochs=num_epochs, batch_size=batch_size,
-                    schedule=schedule, rollout_steps=rollout_steps,
-                    train_steps=train_steps)
+                    schedule=schedule, store_unfeasible=store_unfeasible,
+                    rollout_steps=rollout_steps, train_steps=train_steps)
 
     if schedule:
         act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
@@ -108,7 +109,8 @@ def train_rl_algo(method: str = None,
                    wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
     agent.init(env=env, min_memories=2000)
-    agent = train_loop(agent, env, num_epochs, batch_size, rollout_steps, train_steps, test_env=test_env)
+    agent = train_loop(agent, env, num_epochs, batch_size, rollout_steps, train_steps,
+                       store_unfeasible=store_unfeasible, test_env=test_env)
     test_agent(agent, test_env)
     agent.save('_final')
 
