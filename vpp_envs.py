@@ -39,7 +39,8 @@ class VPPEnv(Env):
                  noise_std_dev=0.02,
                  savepath=None,
                  safety_layer=False,
-                 step_reward=False):
+                 step_reward=False,
+                 multidim_reward=False):
         """
         :param predictions: pandas.Dataframe; predicted PV and Load.
         :param c_grid: numpy.array; c_grid values.
@@ -79,6 +80,7 @@ class VPPEnv(Env):
         self.savepath = savepath
         self.safety_layer = safety_layer
         self.step_reward = step_reward
+        self.multidim_reward = multidim_reward
         self._create_instance_variables()
 
     def _create_instance_variables(self):
@@ -776,7 +778,8 @@ class MarkovianRlVPPEnv(VPPEnv):
                  noise_std_dev=0.02,
                  savepath=None,
                  safety_layer=False,
-                 step_reward=False):
+                 step_reward=False,
+                 multidim_reward=False):
         """
         :param predictions: pandas.Dataframe; predicted PV and Load.
         :param c_grid: numpy.array; c_grid values.
@@ -858,6 +861,9 @@ class MarkovianRlVPPEnv(VPPEnv):
         assert self.shift is not None, "shifts must be initialized before the step function"
         assert self.p_ren_pv_real is not None, "Real PV values must be initialized before the step function"
         assert self.tot_cons_real is not None, "Real Load values must be initialized before the step function"
+
+        if not isinstance(action, np.ndarray):
+            action = np.array(action)
 
         if np.any(action < self.action_space.low) or np.any(action > self.action_space.high):
             action = np.clip(action.astype(np.float64), self.action_space.low, self.action_space.high)
@@ -1020,4 +1026,4 @@ class MarkovianRlVPPEnv(VPPEnv):
                                             'action': actual_action,
                                             'actions_l2_dist': np.sum((self.rescale(action) - actual_action) ** 2),
                                             'sl_usage': self.sl_counter / self.timestep,
-                                            'constraint_violation': constraint_violation}
+                                            'constraint_violation': constraint_violation/10}

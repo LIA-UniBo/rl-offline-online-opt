@@ -16,8 +16,11 @@ import wandb
 
 import vpp_envs
 import online_heuristic
+from agent import SACSE
 
 METHODS = ['hybrid-single-step', 'hybrid-mdp', 'rl-single-step', 'rl-mdp']
+
+wandb_running = lambda: wandb.run is not None
 
 
 ########################################################################################################################
@@ -98,7 +101,8 @@ def train_loop(agent, env, num_epochs, batch_size,
     episode = 0
     # Test untrained agent
     best_score, sl_usage, l2_dists = test_agent(agent, test_env, render_plots=False)
-    wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
+    if wandb_running():
+        wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
 
     # Main loop
     s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
@@ -109,11 +113,13 @@ def train_loop(agent, env, num_epochs, batch_size,
             agent_out = agent.act(s_t)
             a_t, lp_t = agent_out.actions, agent_out.logprobs
             s_tp1, r_t, done, info = env.step(a_t[0])
+            if isinstance(agent, SACSE):
+                r_t = np.array([[r_t, info['constraint_violation']]])
             s_tp1 = s_tp1.reshape(1, -1)
             feasible_action = env.rescale(info['action'], to_network_range=True).reshape(1, -1)
             agent.remember(state=s_t,
                            action=feasible_action,
-                           reward=np.asarray([r_t]),
+                           reward=r_t,
                            next_state=s_tp1,
                            done=[done],
                            logprob=lp_t)
@@ -122,11 +128,11 @@ def train_loop(agent, env, num_epochs, batch_size,
                 # FIXME agents without SL save the same memory twice
                 agent.remember(state=s_t,
                                action=a_t,
-                               reward=np.asarray([r_t - info['actions_l2_dist']/10.]),
+                               reward=np.asarray([r_t - info['actions_l2_dist'] / 10.]),
                                next_state=s_tp1,
                                done=[done],
                                logprob=lp_t)
-            if 'episode' in info:
+            if 'episode' in info and wandb_running():
                 episode += 1
                 wandb.log({'episode': episode,
                            'train/score': info['episode']['r'],
@@ -146,7 +152,8 @@ def train_loop(agent, env, num_epochs, batch_size,
                 agent.save(ver=k)
             k += 1
             loss_dict['test/score'] = score
-            wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
+            if wandb_running():
+                wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
             pbar.set_description(f'[EVAL SCORE: {score:4.0f}] TRAINING')
 
     return agent

@@ -8,7 +8,7 @@ from copy import deepcopy
 import gym.vector
 from pyagents.utils import get_optimizer
 
-from agent import SacMod
+from agent import SACSE, SacMod, EditorNetwork, ExtendedQNetwork
 from vpp_envs import SingleStepVPPEnv, MarkovianVPPEnv, SingleStepFullRLVPP, MarkovianRlVPPEnv
 import numpy as np
 import pandas as pd
@@ -18,7 +18,7 @@ import argparse
 import gin
 import tensorflow as tf
 from typing import Union, List
-from pyagents import networks, agents
+from pyagents import networks
 from utility import timestamps_headers, make_env, METHODS, train_loop, test_agent
 
 ########################################################################################################################
@@ -77,38 +77,76 @@ def train_rl_algo(method: str = None,
                                    output='gaussian', bounds=bounds, activation='relu',
                                    out_params={'state_dependent_std': True,
                                                'mean_activation': None})
-    q1_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
-    q2_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
+    if algo == 'SAC':
+        q1_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
+        q2_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
 
-    log_dict = dict(act_learning_rate=act_learning_rate,
-                    crit_learning_rate=crit_learning_rate,
-                    alpha_learning_rate=alpha_learning_rate,
-                    num_epochs=num_epochs, batch_size=batch_size,
-                    schedule=schedule, store_unfeasible=store_unfeasible,
-                    rollout_steps=rollout_steps, train_steps=train_steps)
+        log_dict = dict(act_learning_rate=act_learning_rate,
+                        crit_learning_rate=crit_learning_rate,
+                        alpha_learning_rate=alpha_learning_rate,
+                        num_epochs=num_epochs, batch_size=batch_size,
+                        schedule=schedule, store_unfeasible=store_unfeasible,
+                        rollout_steps=rollout_steps, train_steps=train_steps)
 
-    if schedule:
-        act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
-                                                                          num_epochs,
-                                                                          0.)
-        crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate,
-                                                                           num_epochs,
-                                                                           0.)
-        alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
-                                                                            num_epochs,
-                                                                            0.)
-    a_opt = get_optimizer(learning_rate=act_learning_rate)
-    c1_opt = get_optimizer(learning_rate=crit_learning_rate)
-    c2_opt = get_optimizer(learning_rate=crit_learning_rate)
-    alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
+        if schedule:
+            act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
+                                                                              num_epochs,
+                                                                              0.)
+            crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate,
+                                                                               num_epochs,
+                                                                               0.)
+            alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
+                                                                                num_epochs,
+                                                                                0.)
+        a_opt = get_optimizer(learning_rate=act_learning_rate)
+        c1_opt = get_optimizer(learning_rate=crit_learning_rate)
+        c2_opt = get_optimizer(learning_rate=crit_learning_rate)
+        alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
 
-    agent = SacMod(state_shape, action_shape, buffer='uniform', gamma=discount,
-                   actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
-                   actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                   target_update_period=1, reward_scaling=1.0,
-                   wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
+        agent = SacMod(state_shape, action_shape, buffer='uniform', gamma=discount,
+                       actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=False,
+                       actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
+                       target_update_period=1, reward_scaling=1.0,
+                       wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
-    agent.init(env=env, min_memories=2000)
+    elif algo == 'SACSE':
+        editor_net = EditorNetwork(state_shape, action_shape,
+                                   output='gaussian', bounds=bounds, activation='relu',
+                                   out_params={'state_dependent_std': True,
+                                               'mean_activation': None})
+        reward_shape = (2,)
+        q_nets = ExtendedQNetwork(state_shape, action_shape, reward_shape)
+
+        log_dict = dict(act_learning_rate=act_learning_rate,
+                        crit_learning_rate=crit_learning_rate,
+                        alpha_learøning_rate=alpha_learning_rate,
+                        num_epochs=num_epochs, batch_size=batch_size,
+                        schedule=schedule, store_unfeasible=store_unfeasible,
+                        rollout_steps=rollout_steps, train_steps=train_steps)
+
+        if schedule:
+            act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
+                                                                              num_epochs,
+                                                                              0.)
+            crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate,
+                                                                               num_epochs,
+                                                                               0.)
+            alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
+                                                                                num_epochs,
+                                                                                0.)
+        a_opt = get_optimizer(learning_rate=act_learning_rate)
+        ed_opt = get_optimizer(learning_rate=act_learning_rate)
+        c_opt = get_optimizer(learning_rate=crit_learning_rate)
+        alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
+
+        agent = SACSE(state_shape, action_shape, buffer='uniform', gamma=discount,
+                      actor=a_net, editor=editor_net, critics=q_nets, reward_normalization=False,
+                      actor_opt=a_opt, editor_opt=ed_opt, critic_opt=c_opt, alpha_opt=alpha_opt,
+                      target_update_period=1, reward_scaling=1.0,
+                      wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
+    else:
+        raise Exception("either algo SAC or SACSE")
+    agent.init(envs=env, min_memories=2000)
     agent = train_loop(agent, env, num_epochs, batch_size, rollout_steps, train_steps,
                        store_unfeasible=store_unfeasible, test_env=test_env)
     test_agent(agent, test_env)
