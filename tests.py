@@ -32,6 +32,7 @@ TIMESTEP_IN_A_DAY = 96
 
 @gin.configurable
 def train_rl_algo(method: str = None,
+                  algo: str = 'SAC',
                   safety_layer: bool = False,
                   step_reward: bool = False,
                   instances: Union[float, List[int]] = 0.25,
