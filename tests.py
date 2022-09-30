@@ -116,7 +116,7 @@ def train_rl_algo(method: str = None,
                                    out_params={'state_dependent_std': True,
                                                'mean_activation': None})
         reward_shape = (2,)
-        q_nets = ExtendedQNetwork(state_shape, action_shape, reward_shape)
+        q_nets = ExtendedQNetwork(state_shape, action_shape, reward_shape, n_critics=2)
 
         log_dict = dict(act_learning_rate=act_learning_rate,
                         crit_learning_rate=crit_learning_rate,

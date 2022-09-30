@@ -115,23 +115,32 @@ def train_loop(agent, env, num_epochs, batch_size,
             s_tp1, r_t, done, info = env.step(a_t[0])
             if isinstance(agent, SACSE):
                 r_t = np.array([[r_t, info['constraint_violation']]])
+            else:
+                r_t = np.asarray([r_t])
             s_tp1 = s_tp1.reshape(1, -1)
             feasible_action = env.rescale(info['action'], to_network_range=True).reshape(1, -1)
-            agent.remember(state=s_t,
-                           action=feasible_action,
-                           reward=r_t,
-                           next_state=s_tp1,
-                           done=[done],
-                           logprob=lp_t)
             # also store unfeasible action in buffer
-            if not info['feasible'] and store_unfeasible:  # TODO check if useful
-                # FIXME agents without SL save the same memory twice
+            if not info['feasible'] and store_unfeasible:
+                agent.remember(state=s_t,
+                               action=feasible_action,
+                               reward=r_t,
+                               next_state=s_tp1,
+                               done=[done],
+                               logprob=lp_t)
                 agent.remember(state=s_t,
                                action=a_t,
                                reward=np.asarray([r_t - info['actions_l2_dist'] / 10.]),
                                next_state=s_tp1,
                                done=[done],
                                logprob=lp_t)
+            else:
+                agent.remember(state=s_t,
+                               action=a_t,
+                               reward=r_t,
+                               next_state=s_tp1,
+                               done=[done],
+                               logprob=lp_t)
+
             if 'episode' in info and wandb_running():
                 episode += 1
                 wandb.log({'episode': episode,
