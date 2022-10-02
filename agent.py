@@ -318,6 +318,10 @@ class SACSE(OffPolicyAgent):
     def alpha_editor(self):
         return tf.exp(tf.stop_gradient(self._log_alpha_editor))
 
+    @property
+    def lambda_weight(self):
+        return tf.math.softplus(tf.stop_gradient(self._lambda_weight))
+
     def remember(self, state: np.ndarray, action, reward: float, next_state: np.ndarray, done: bool, *args,
                  **kwargs) -> None:
         if 'reward' in self.normalizers:
