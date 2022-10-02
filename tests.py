@@ -80,6 +80,7 @@ def train_rl_algo(method: str = None,
                                    out_params={'state_dependent_std': True,
                                                'mean_activation': None})
     if algo == 'SAC':
+        wandb_params['tags'] += ['sac']
         q1_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
         q2_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape)
 
@@ -112,6 +113,7 @@ def train_rl_algo(method: str = None,
                        wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
     elif algo == 'SACSE':
+        wandb_params['tags'] += ['sacse']
         editor_net = EditorNetwork(state_shape, action_shape,
                                    output='gaussian', bounds=bounds, activation='relu',
                                    out_params={'state_dependent_std': True,
@@ -366,7 +368,7 @@ if __name__ == '__main__':
         f.close()
         tags = ['safety_layer'] if safety_layer else []
         tags += ['step_reward'] if step_reward else []
-        tags += ['sac'] + list(map(lambda n: str(n), indexes))
+        tags += list(map(lambda n: str(n), indexes))
         wandb_params = {'key': key,
                         'project': 'rl-online-offline-opt',
                         'entity': 'mazelions',
