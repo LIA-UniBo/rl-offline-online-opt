@@ -43,6 +43,7 @@ def train_rl_algo(method: str = None,
                   crit_learning_rate: float = 7e-4,
                   act_learning_rate: float = 7e-4,
                   alpha_learning_rate: float = 7e-4,
+                  lambda_learning_rate: float = 0.01,
                   rollout_steps: int = 1,
                   train_steps: int = 1,
                   log_dir: str = None,
@@ -135,15 +136,19 @@ def train_rl_algo(method: str = None,
             alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
                                                                                 num_epochs,
                                                                                 0.)
+            lambda_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(lambda_learning_rate,
+                                                                                 num_epochs,
+                                                                                 0.)
         a_opt = get_optimizer(learning_rate=act_learning_rate)
         ed_opt = get_optimizer(learning_rate=act_learning_rate)
         c_opt = get_optimizer(learning_rate=crit_learning_rate)
         alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
+        lambda_opt = get_optimizer(learning_rate=lambda_learning_rate)
 
         agent = SACSE(state_shape, action_shape, buffer='uniform', gamma=discount,
-                      actor=a_net, editor=editor_net, critics=q_nets, reward_normalization=False,
+                      actor=a_net, editor=editor_net, critics=q_nets,
                       actor_opt=a_opt, editor_opt=ed_opt, critic_opt=c_opt, alpha_opt=alpha_opt,
-                      target_update_period=1, reward_scaling=1.0,
+                      lambda_opt=lambda_opt, train_lambda=True, target_update_period=1, reward_scaling=1.0,
                       wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
     else:
         raise Exception("either algo SAC or SACSE")

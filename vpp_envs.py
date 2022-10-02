@@ -1026,4 +1026,4 @@ class MarkovianRlVPPEnv(VPPEnv):
                                             'action': actual_action,
                                             'actions_l2_dist': np.sum((self.rescale(action) - actual_action) ** 2),
                                             'sl_usage': self.sl_counter / self.timestep,
-                                            'constraint_violation': constraint_violation/10}
+                                            'constraint_violation': -constraint_violation/10}

@@ -11,7 +11,6 @@ from pyagents.utils import json_utils
 from wandb.wandb_agent import Agent
 
 import wandb
-from keras.optimizers import Adam
 from tensorflow.keras.optimizers import Adam
 from pyagents.agents import SAC, OffPolicyAgent
 from pyagents.memory import Buffer, load_memories
@@ -20,6 +19,7 @@ from pyagents.networks.network import NetworkOutput, Network
 from pyagents.policies import Policy
 
 
+@gin.configurable
 class SacMod(SAC):
 
     def init(self, envs, env_config=None, min_memories=None, actions=None, *args, **kwargs):
@@ -180,13 +180,15 @@ class SACSE(OffPolicyAgent):
                  editor_opt: tf.keras.optimizers.Optimizer = None,
                  critic_opt: tf.keras.optimizers.Optimizer = None,
                  alpha_opt: Optional[tf.keras.optimizers.Optimizer] = None,
+                 lambda_opt: Optional[tf.keras.optimizers.Optimizer] = None,
                  buffer: Optional[Buffer] = None,
                  gamma: float = 0.99,
                  standardize: bool = True,
                  reward_shape: tuple = (1,),
-                 reward_weights=1.0,
                  reward_normalization: bool = True,
                  reward_scaling: float = 1.,
+                 initial_lambda=1.0,
+                 train_lambda: bool = True,
                  target_update_period: int = 500,
                  tau: float = 1.0,
                  initial_alpha: float = 1.,
@@ -234,6 +236,12 @@ class SACSE(OffPolicyAgent):
         if self.train_alpha and self._alpha_opt is None and self._actor_opt is not None:
             self._alpha_opt = Adam(learning_rate=self._actor_opt.learning_rate)
 
+        self._lambda_weight = tf.Variable(initial_value=tf.math.log(tf.math.exp(initial_lambda) - 1.), trainable=True)
+        self.train_lambda = train_lambda
+        self._lambda_opt = lambda_opt
+        if self.train_lambda and self._lambda_opt is None and self._actor_opt is not None:
+            self._lambda_opt = Adam(learning_rate=self._actor_opt.learning_rate)
+
         self._policy = EditorPolicy(state_shape, action_shape, self._actor.get_policy(), self._editor, self.add_actions)
 
         self.gamma = gamma
@@ -244,7 +252,6 @@ class SACSE(OffPolicyAgent):
         self.target_entropy = target_entropy if target_entropy else -np.prod(self.action_shape)
 
         self.reward_shape = reward_shape
-        self._reward_weights = reward_weights
         if reward_normalization:
             self.init_normalizer('reward', reward_shape)
         self.reward_scale = reward_scaling
@@ -255,7 +262,8 @@ class SACSE(OffPolicyAgent):
                             'standardize': self._standardize,
                             'n_critics': self._online_critics.n_critics,
                             'reward_shape': reward_shape,
-                            'reward_weights': reward_weights,
+                            'initial_lambda': initial_lambda,
+                            'train_lambda': train_lambda,
                             'reward_normalization': reward_normalization,
                             'gradient_clip_norm': self._gradient_clip_norm,
                             'target_entropy': self.target_entropy,
@@ -377,7 +385,7 @@ class SACSE(OffPolicyAgent):
         # distance between ahat and corrected action
         a_l2 = tf.reduce_mean(tf.math.squared_difference(actions, ahat_out.actions), axis=-1)  # check axis
 
-        editor_loss = tf.reduce_mean(self.alpha_editor * logprobs + a_l2 - self._reward_weights * q)
+        editor_loss = tf.reduce_mean(self.alpha_editor * logprobs + a_l2 - self.lambda_weight * q)
         return {'editor_loss': editor_loss, 'logprobs': logprobs}
 
     def _train(self, batch_size: int, update_rounds: int, *args, **kwargs) -> dict:
@@ -395,7 +403,8 @@ class SACSE(OffPolicyAgent):
         next_action = self.add_actions(ahat_out.actions, da_out.actions, self._policy.bounds)
 
         q_target = self._target_critics((next_states, next_action)).critic_values  # b, n_crit, rew_shape
-        targets = self.reward_scale * rewards + self.gamma * (1 - dones) * tf.math.reduce_min(q_target, axis=1)  # b, rew_shape
+        targets = self.reward_scale * rewards + self.gamma * (1 - dones) * tf.math.reduce_min(q_target,
+                                                                                              axis=1)  # b, rew_shape
 
         critic_loss_info = dict()
         for name, q in self._online_critics.networks.items():
@@ -428,16 +437,17 @@ class SACSE(OffPolicyAgent):
             editor_loss = editor_loss_info['editor_loss']
 
         actor_grads_and_vars, actor_norm = self._apply_gradients(act_loss, self._actor_opt, actor_vars, pi_tape)
-        editor_grads_and_vars, editor_norm = self._apply_gradients(editor_loss, self._editor_opt, editor_vars, editor_tape)
+        editor_grads_and_vars, editor_norm = self._apply_gradients(editor_loss, self._editor_opt, editor_vars,
+                                                                   editor_tape)
 
         # TODO finire con stats
-        critic_losses = {c: l for c, l in critic_loss_info.items() if c.endswith('loss')}
+        critic_losses = {c: float(l) for c, l in critic_loss_info.items() if c.endswith('loss')}
         loss_dict = {'policy_loss': float(act_loss),
                      'editor_loss': float(editor_loss),
                      **critic_losses}
 
         if self.train_alpha:
-            logprobs = [pi_loss_info['logprobs'],  editor_loss_info['logprobs']]
+            logprobs = [pi_loss_info['logprobs'], editor_loss_info['logprobs']]
             for i, log_alpha in enumerate([self._log_alpha_actor, self._log_alpha_editor]):
                 with tf.GradientTape(watch_accessed_variables=False) as alpha_tape:
                     alpha_tape.watch([log_alpha])
@@ -451,6 +461,19 @@ class SACSE(OffPolicyAgent):
                 alpha_grads_log[f'alpha{i}/norm'] = alpha_norm
         else:
             alpha_grads_log = {}
+
+        if self.train_lambda:
+            with tf.GradientTape(watch_accessed_variables=False) as lambda_tape:
+                lambda_tape.watch([self._lambda_weight])
+                lambda_loss = tf.math.softplus(self._lambda_weight) * tf.reduce_mean(rewards[..., 1])
+            lambda_grads_and_vars, lambda_norm = self._apply_gradients(lambda_loss, self._lambda_opt,
+                                                                       [self._lambda_weight], lambda_tape)
+            loss_dict['loss_lambda'] = lambda_loss
+            lambda_grads_log = {f'lambda/{".".join(var.name.split("/"))}': grad.numpy()
+                               for grad, var in lambda_grads_and_vars}
+            lambda_grads_log[f'lambda/norm'] = lambda_norm
+        else:
+            lambda_grads_log = {}
 
         if self._train_step % self.target_update_period == 0:
             for o, t in zip(self._online_critics.networks.values(),
@@ -473,11 +496,12 @@ class SACSE(OffPolicyAgent):
                     critic1_grads_log['critic1/norm'] = critic_loss_info[f'critic1_norm']
                     critic1_grads_log['critic2/norm'] = critic_loss_info[f'critic2_norm']
                 self._log(do_log_step=False, prefix='gradients', **pi_grads_log, **critic1_grads_log,
-                          **critic2_grads_log, **alpha_grads_log)
+                          **critic2_grads_log, **alpha_grads_log, **lambda_grads_log)
 
             # state_values = tf.minimum(critic_loss_info['q1'], critic_loss_info['q2']).numpy()
             self._log(do_log_step=False, prefix='debug', td_targets=targets.numpy(),
-                      alpha_actor=float(self.alpha_actor), alpha_editor=float(self.alpha_editor))
+                      alpha_actor=float(self.alpha_actor), alpha_editor=float(self.alpha_editor),
+                      lambda_weight=float(self.lambda_weight))
             self._log(do_log_step=True, **loss_dict, train_step=self._train_step)
         return loss_dict
 
