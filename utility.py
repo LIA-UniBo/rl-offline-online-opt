@@ -19,6 +19,7 @@ import online_heuristic
 from agent import SACSE
 
 METHODS = ['hybrid-single-step', 'hybrid-mdp', 'rl-single-step', 'rl-mdp']
+RL_ALGOS = ['SAC', 'SACSE']
 
 wandb_running = lambda: wandb.run is not None
 
@@ -102,7 +103,7 @@ def train_loop(agent, env, num_epochs, batch_size,
     # Test untrained agent
     best_score, sl_usage, l2_dists, constraints_rews = test_agent(agent, test_env, render_plots=False)
     if wandb_running():
-        wandb.log({'episode': episode, 'test/score': best_score, 'test/safety-layer-usage': sl_usage,
+        wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage,
                    'test/actions_l2_dist': l2_dists, 'test/constraint_rewards': constraints_rews})
 
     # Main loop

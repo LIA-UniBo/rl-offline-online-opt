@@ -893,7 +893,10 @@ class MarkovianRlVPPEnv(VPPEnv):
         # If the storage constraints are not satisfied or the energy bought is negative then the solution is not
         # feasible. Use safety layer to compute the closest feasible action
         if storage_in > self.cap_max - self.storage or storage_out > self.storage or grid_out < 0:
-            constraint_violation = min(grid_out, 0) + min(self.storage - storage_out, 0) + min(self.cap_max - self.storage - storage_in, 0)
+            # Compute constraints reward. Maximum is 0 (all constraints satisfied) and it is scaled by 0.1.
+            constraint_violation = 0.1 * (min(grid_out, 0) +
+                                          min(self.storage - storage_out, 0) +
+                                          min(self.cap_max - self.storage - storage_in, 0))
             feasible = False
             feasible_action = self._find_feasible((storage_in, storage_out, grid_in, diesel_power))
             storage_in, storage_out, grid_in, diesel_power = feasible_action
@@ -1026,4 +1029,4 @@ class MarkovianRlVPPEnv(VPPEnv):
                                             'action': actual_action,
                                             'actions_l2_dist': np.sum((self.rescale(action) - actual_action) ** 2),
                                             'sl_usage': self.sl_counter / self.timestep,
-                                            'constraint_violation': -constraint_violation/10}
+                                            'constraint_violation': constraint_violation}

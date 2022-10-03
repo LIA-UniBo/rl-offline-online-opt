@@ -388,12 +388,17 @@ class SACSE(OffPolicyAgent):
         logprobs = da_out.logprobs
 
         # constraints q values
-        q = tf.reduce_mean(self._online_critics((states, actions)).critic_values, axis=1)[..., 1]  # b,
+        critics = tf.reduce_mean(self._online_critics((states, actions)).critic_values, axis=1)  # b, rew_shape
+        q = critics[..., 1]  # b,
 
-        # distance between ahat and corrected action
-        a_l2 = tf.reduce_mean(tf.math.squared_difference(actions, ahat_out.actions), axis=-1)  # check axis
+        if self._editor_hinge_loss:
+            a_hat_critics = tf.reduce_mean(self._online_critics((states, ahat_out.actions)).critic_values, axis=1)
+            act_distance = tf.nn.relu(a_hat_critics[..., 0] - critics[..., 0])
+        else:
+            # distance between ahat and corrected action
+            act_distance = tf.reduce_mean(tf.math.squared_difference(actions, ahat_out.actions), axis=-1)
 
-        editor_loss = tf.reduce_mean(self.alpha_editor * logprobs + a_l2 - self.lambda_weight * q)
+        editor_loss = tf.reduce_mean(self.alpha_editor * logprobs + act_distance - self.lambda_weight * q)
         return {'editor_loss': editor_loss, 'logprobs': logprobs}
 
     def _train(self, batch_size: int, update_rounds: int, *args, **kwargs) -> dict:
