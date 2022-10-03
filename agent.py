@@ -184,6 +184,7 @@ class SACSE(OffPolicyAgent):
                  buffer: Optional[Buffer] = None,
                  gamma: float = 0.99,
                  standardize: bool = True,
+                 editor_hinge_loss: bool = False,
                  reward_shape: tuple = (1,),
                  reward_normalization: bool = True,
                  reward_scaling: float = 1.,
@@ -246,6 +247,7 @@ class SACSE(OffPolicyAgent):
 
         self.gamma = gamma
         self._standardize = standardize
+        self._editor_hinge_loss = editor_hinge_loss
         self.target_update_period = target_update_period
         self.tau = tau
         self._gradient_clip_norm = gradient_clip_norm
@@ -260,6 +262,7 @@ class SACSE(OffPolicyAgent):
                             'tau': self.tau,
                             'target_update_period': self.target_update_period,
                             'standardize': self._standardize,
+                            'editor_hinge_loss': self._editor_hinge_loss,
                             'n_critics': self._online_critics.n_critics,
                             'reward_shape': reward_shape,
                             'initial_lambda': initial_lambda,
@@ -286,7 +289,8 @@ class SACSE(OffPolicyAgent):
         self._online_critics((ones, a))
         self._target_critics((ones, a))
 
-    def add_actions(self, a, da, bounds):
+    @staticmethod
+    def add_actions(a, da, bounds):
         act = a + 2 * da
         return tf.clip_by_value(act, bounds[0], bounds[1])
 
