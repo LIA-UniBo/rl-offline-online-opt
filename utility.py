@@ -100,9 +100,10 @@ def train_loop(agent, env, num_epochs, batch_size,
     k = 1
     episode = 0
     # Test untrained agent
-    best_score, sl_usage, l2_dists = test_agent(agent, test_env, render_plots=False)
+    best_score, sl_usage, l2_dists, constraints_rews = test_agent(agent, test_env, render_plots=False)
     if wandb_running():
-        wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
+        wandb.log({'episode': episode, 'test/score': best_score, 'test/safety-layer-usage': sl_usage,
+                   'test/actions_l2_dist': l2_dists, 'test/constraint_rewards': constraints_rews})
 
     # Main loop
     s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
@@ -122,14 +123,15 @@ def train_loop(agent, env, num_epochs, batch_size,
             # also store unfeasible action in buffer
             if not info['feasible'] and store_unfeasible:
                 agent.remember(state=s_t,
-                               action=feasible_action,
+                               action=a_t,
                                reward=r_t,
                                next_state=s_tp1,
                                done=[done],
                                logprob=lp_t)
+                # Corrected action has same utility reward, but 0 (maximum) constraint reward
                 agent.remember(state=s_t,
-                               action=a_t,
-                               reward=np.asarray([r_t - info['actions_l2_dist'] / 10.]),
+                               action=feasible_action,
+                               reward=np.array([r_t[0], 0.]),
                                next_state=s_tp1,
                                done=[done],
                                logprob=lp_t)
@@ -155,14 +157,15 @@ def train_loop(agent, env, num_epochs, batch_size,
         # Testing
         if test_env is not None and epoch > k * test_every:
             pbar.set_description('TESTING')
-            score, sl_usage, l2_dists = test_agent(agent, test_env, render_plots=False)
+            score, sl_usage, l2_dists, constraints_rews = test_agent(agent, test_env, render_plots=False)
             if score > best_score:
                 best_score = score
                 agent.save(ver=k)
             k += 1
             loss_dict['test/score'] = score
             if wandb_running():
-                wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage, 'test/actions_l2_dist': l2_dists})
+                wandb.log({'test/score': score, 'test/safety-layer-usage': sl_usage,
+                           'test/actions_l2_dist': l2_dists, 'test/constraint_rewards': constraints_rews})
             pbar.set_description(f'[EVAL SCORE: {score:4.0f}] TRAINING')
 
     return agent
@@ -176,6 +179,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
     score = 0
     all_actions = []
     l2_dists = []
+    constraint_rewards = []
 
     # Perform an episode
     while not done:
@@ -187,6 +191,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
         s_tp1 = s_tp1.reshape(1, -1)
         all_actions.append(np.squeeze(a_t))
         l2_dists.append(info['actions_l2_dist'])
+        constraint_rewards.append(info['constraint_violation'])
         score += r_t
         s_t = test_env.reset().reshape(1, -1) if done else s_tp1
 
@@ -199,7 +204,7 @@ def test_agent(agent, test_env, render_plots=True, save_path=None):
                                            display=False,
                                            savepath=save_path,
                                            wandb_log=agent.is_logging)
-    return score, info['sl_usage'], np.mean(l2_dists)
+    return score, info['sl_usage'], np.mean(l2_dists), np.mean(constraint_rewards)
 
 
 ########################################################################################################################
