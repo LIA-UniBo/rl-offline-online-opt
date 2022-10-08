@@ -16,10 +16,10 @@ import wandb
 
 import vpp_envs
 import online_heuristic
-from agent import SACSE
+from agent import SACSE, PPOMod, SACMod
 
 METHODS = ['hybrid-single-step', 'hybrid-mdp', 'rl-single-step', 'rl-mdp']
-RL_ALGOS = ['SAC', 'SACSE']
+RL_ALGOS = ['PPO', 'SAC', 'SACSE']
 
 wandb_running = lambda: wandb.run is not None
 
@@ -97,7 +97,7 @@ def make_env(method, instances, noise_std_dev: Union[float, int] = 0.01,
 
 
 def train_loop(agent, env, num_epochs, batch_size,
-               rollout_steps=1, train_steps=1, test_every=200, store_unfeasible=False, test_env=None):
+               rollout_steps=1, train_steps=1, test_every=200, store_feasible=False, test_env=None):
     k = 1
     episode = 0
     # Test untrained agent
@@ -105,55 +105,60 @@ def train_loop(agent, env, num_epochs, batch_size,
     if wandb_running():
         wandb.log({'test/score': best_score, 'test/safety-layer-usage': sl_usage,
                    'test/actions_l2_dist': l2_dists, 'test/constraint_rewards': constraints_rews})
-
+    num_envs = (getattr(env, "num_envs", 1))
+    if num_envs > 1:
+        rescale_fn = env.envs[0].rescale
+    else:
+        rescale_fn = env.rescale
     # Main loop
-    s_t = env.reset().reshape(1, -1)  # pyagents wants first dim to be batch dim
+    s_t = env.reset().reshape((num_envs, -1))  # pyagents wants first dim to be batch dim
     for epoch in (pbar := tqdm.trange(0, num_epochs, train_steps, desc='TRAINING')):
 
         # Env interactions
         for _ in range(rollout_steps):
             agent_out = agent.act(s_t)
             a_t, lp_t = agent_out.actions, agent_out.logprobs
-            s_tp1, r_t, done, info = env.step(a_t[0])
+            s_tp1, r_t, done, info = env.step(a_t if isinstance(agent, PPOMod) else a_t[0])
             if isinstance(agent, SACSE):
                 r_t = np.array([[r_t, info['constraint_violation']]])
-            else:
+            elif isinstance(agent, SACMod):
                 r_t = np.asarray([r_t])
-            s_tp1 = s_tp1.reshape(1, -1)
-            feasible_action = env.rescale(info['action'], to_network_range=True).reshape(1, -1)
-            # also store unfeasible action in buffer
-            if not info['feasible'] and store_unfeasible:
-                agent.remember(state=s_t,
-                               action=a_t,
-                               reward=r_t,
-                               next_state=s_tp1,
-                               done=[done],
-                               logprob=lp_t)
+            s_tp1 = s_tp1.reshape(num_envs, -1)
+            if isinstance(agent, PPOMod):
+                agent.remember(state=s_t, action=a_t, reward=r_t, next_state=s_tp1, done=done, logprob=lp_t)
+            elif not info['feasible'] and store_feasible:
+                # also store unfeasible action in buffer
+                feasible_action = rescale_fn(info['action'], to_network_range=True).reshape(num_envs, -1)
                 # Corrected action has same utility reward, but 0 (maximum) constraint reward
-                agent.remember(state=s_t,
-                               action=feasible_action,
-                               reward=np.array([r_t[0], 0.]),
-                               next_state=s_tp1,
-                               done=[done],
-                               logprob=lp_t)
+                agent.remember(state=s_t, action=feasible_action, next_state=s_tp1, done=[done], logprob=lp_t,
+                               reward=np.array([r_t[0], 0.]))
             else:
-                agent.remember(state=s_t,
-                               action=a_t,
-                               reward=r_t,
-                               next_state=s_tp1,
-                               done=[done],
-                               logprob=lp_t)
+                agent.remember(state=s_t, action=a_t, reward=r_t, next_state=s_tp1, done=[done], logprob=lp_t)
 
-            if 'episode' in info and wandb_running():
-                episode += 1
-                wandb.log({'episode': episode,
-                           'train/score': info['episode']['r'],
-                           'train/length': info['episode']['l']})
-            s_t = env.reset().reshape(1, -1) if done else s_tp1
+            if wandb_running():
+                if isinstance(info, list):
+                    for i in filter(lambda info_i: 'episode' in info_i, info):
+                        episode += 1
+                        wandb.log({'episode': episode,
+                                   'train/score': i['episode']['r'],
+                                   'train/length': i['episode']['l'],
+                                   'train/safety-layer-usage': i['sl_usage'],
+                                   'train/actions_l2_dist': i['actions_l2_dist'],
+                                   'train/constraint_rewards': i['constraint_violation']})
+                elif 'episode' in info:
+                    episode += 1
+                    wandb.log({'episode': episode,
+                               'train/score': info['episode']['r'],
+                               'train/length': info['episode']['l']})
+            s_t = env.reset().reshape(num_envs, -1) if not isinstance(env, gym.vector.VectorEnv) and done else s_tp1
         # Training
-        for _ in range(train_steps):
-            loss_dict = agent.train(batch_size)
+        if isinstance(agent, PPOMod):
+            loss_dict = agent.train(batch_size, update_rounds=train_steps)
             pbar.set_postfix(loss_dict)
+        else:
+            for _ in range(train_steps):
+                loss_dict = agent.train(batch_size)
+                pbar.set_postfix(loss_dict)
 
         # Testing
         if test_env is not None and epoch > k * test_every:

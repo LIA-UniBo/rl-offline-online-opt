@@ -6,9 +6,10 @@
 from copy import deepcopy
 
 import gym.vector
+from pyagents.agents import PPO
 from pyagents.utils import get_optimizer
 
-from agent import SACSE, SacMod, EditorNetwork, ExtendedQNetwork
+from agent import SACSE, SACMod, EditorNetwork, ExtendedQNetwork, PPOMod
 from vpp_envs import SingleStepVPPEnv, MarkovianVPPEnv, SingleStepFullRLVPP, MarkovianRlVPPEnv
 import numpy as np
 import pandas as pd
@@ -49,7 +50,9 @@ def train_rl_algo(method: str = None,
                   train_steps: int = 1,
                   log_dir: str = None,
                   wandb_params: dict = None,
-                  store_unfeasible: bool = False,
+                  store_feasible: bool = False,
+                  test_every: int = 200,
+                  n_envs: int = 1,
                   **kwargs):
     """
     Training routine.
@@ -81,33 +84,37 @@ def train_rl_algo(method: str = None,
                                    output='gaussian', bounds=bounds, activation='relu',
                                    out_params={'state_dependent_std': True,
                                                'mean_activation': None})
-    if algo == 'SAC':
+    log_dict = dict(act_learning_rate=act_learning_rate,
+                    crit_learning_rate=crit_learning_rate,
+                    num_epochs=epochs, batch_size=batch_size,
+                    schedule=schedule, store_unfeasible=store_feasible,
+                    rollout_steps=rollout_steps, train_steps=train_steps, n_envs=n_envs)
+    if schedule:
+        act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate, epochs, 0.)
+        crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate, epochs, 0.)
+
+    if algo == 'PPO':
+        v_net = networks.ValueNetwork(state_shape, fc_params=fc_params)
+        a_opt = get_optimizer(learning_rate=act_learning_rate)
+        v_opt = get_optimizer(learning_rate=crit_learning_rate)
+        agent = PPOMod(state_shape, action_shape,
+                       actor=a_net, critic=v_net, actor_opt=a_opt, critic_opt=v_opt,
+                       name='ppo', wandb_params=wandb_params, save_dir=log_dir,
+                       log_dict=log_dict)
+    elif algo == 'SAC':
         q1_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape, fc_params=fc_params)
         q2_net = networks.QNetwork(state_shape=state_shape, action_shape=action_shape, fc_params=fc_params)
 
-        log_dict = dict(act_learning_rate=act_learning_rate,
-                        crit_learning_rate=crit_learning_rate,
-                        alpha_learning_rate=alpha_learning_rate,
-                        num_epochs=epochs, batch_size=batch_size,
-                        schedule=schedule, store_unfeasible=store_unfeasible,
-                        rollout_steps=rollout_steps, train_steps=train_steps)
+        log_dict['alpha_learning_rate'] = alpha_learning_rate
 
         if schedule:
-            act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
-                                                                              epochs,
-                                                                              0.)
-            crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate,
-                                                                               epochs,
-                                                                               0.)
-            alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
-                                                                                epochs,
-                                                                                0.)
+            alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate, epochs, 0.)
         a_opt = get_optimizer(learning_rate=act_learning_rate)
         c1_opt = get_optimizer(learning_rate=crit_learning_rate)
         c2_opt = get_optimizer(learning_rate=crit_learning_rate)
         alpha_opt = get_optimizer(learning_rate=alpha_learning_rate)
 
-        agent = SacMod(state_shape, action_shape, buffer='uniform', gamma=discount,
+        agent = SACMod(state_shape, action_shape, buffer='uniform', gamma=discount,
                        actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=kwargs['reward_normalization'],
                        actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
                        target_update_period=1, reward_scaling=1.0,
@@ -120,28 +127,12 @@ def train_rl_algo(method: str = None,
                                                'mean_activation': None})
         reward_shape = (2,)
         q_nets = ExtendedQNetwork(state_shape, action_shape, reward_shape, fc_params=fc_params, n_critics=2)
-
-        log_dict = dict(act_learning_rate=act_learning_rate,
-                        crit_learning_rate=crit_learning_rate,
-                        alpha_learning_rate=alpha_learning_rate,
-                        lambda_learning_rate=lambda_learning_rate,
-                        num_epochs=epochs, batch_size=batch_size,
-                        schedule=schedule, store_unfeasible=store_unfeasible,
-                        rollout_steps=rollout_steps, train_steps=train_steps)
+        log_dict['alpha_learning_rate'] = alpha_learning_rate
+        log_dict['lambda_learning_rate'] = lambda_learning_rate
 
         if schedule:
-            act_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(act_learning_rate,
-                                                                              epochs,
-                                                                              0.)
-            crit_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(crit_learning_rate,
-                                                                               epochs,
-                                                                               0.)
-            alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate,
-                                                                                epochs,
-                                                                                0.)
-            lambda_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(lambda_learning_rate,
-                                                                                 epochs,
-                                                                                 0.)
+            alpha_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(alpha_learning_rate, epochs, 0.)
+            lambda_learning_rate = tf.keras.optimizers.schedules.PolynomialDecay(lambda_learning_rate, epochs, 0.)
         a_opt = get_optimizer(learning_rate=act_learning_rate)
         ed_opt = get_optimizer(learning_rate=act_learning_rate)
         c_opt = get_optimizer(learning_rate=crit_learning_rate)
@@ -156,9 +147,11 @@ def train_rl_algo(method: str = None,
                       wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
     else:
         raise Exception("either algo SAC or SACSE")
-    agent.init(envs=env, min_memories=2000)
+    if isinstance(agent, PPO):
+        env = gym.vector.SyncVectorEnv([lambda: deepcopy(env) for _ in range(n_envs)])
+    agent.init(envs=env, rollout_steps=rollout_steps, min_memories=2000)
     agent = train_loop(agent, env, epochs, batch_size, rollout_steps, train_steps,
-                       store_unfeasible=store_unfeasible, test_env=test_env)
+                       test_every=test_every, store_feasible=store_feasible, test_env=test_env)
     test_agent(agent, test_env)
     agent.save('_final')
 
@@ -333,15 +326,15 @@ def get_args_dict():
                         help="'train': if you want to train a model from scratch;"
                              + "'test': if you want to test an existing model.")
     parser.add_argument("--algo", type=str, choices=RL_ALGOS, default='SAC',
-                        help="Offline RL algorithms to use, 'SAC' or 'SACSE'.")
+                        help="Offline RL algorithms to use, 'PPO', 'SAC' or 'SACSE'.")
 
     # Additional configs
     parser.add_argument('-sl', '--safety-layer', action='store_true',
-                        help="If True, use safety layer to correct unfeasible actions at training time." 
+                        help="If True, use safety layer to correct unfeasible actions at training time."
                              "Safety Layer is always enabled at testing time to ensure action feasibility.")
     parser.add_argument('-sr', '--step-reward', action='store_true',
                         help="If True, env returns step-by-step costs rather than cumulative cost at end of episode.")
-    parser.add_argument('--store-unfeasible', action='store_true',
+    parser.add_argument('--store-feasible', action='store_true',
                         help='If True, agent stores both feasible and unfeasible actions with different rewards.')
     parser.add_argument('--gin', default=None, help='(Optional) path to .gin config file.')
 
@@ -401,7 +394,7 @@ if __name__ == '__main__':
                         'project': 'rl-online-offline-opt',
                         'entity': 'mazelions',
                         'tags': tags,
-                        'group': '-'.join(map(lambda n: str(n), indexes))}
+                        'group': 'final'}
     else:
         wandb_params = None
     if args['gin'] is not None:

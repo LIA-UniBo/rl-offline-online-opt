@@ -2,17 +2,15 @@ from copy import deepcopy
 from typing import Optional, Iterable, Union, List, Dict
 
 import gin
-import h5py
+import gym.vector
 import tensorflow as tf
 import numpy as np
 from pyagents.agents.agent import update_target
 from pyagents.policies.policy import PolicyOutput
-from pyagents.utils import json_utils
-from wandb.wandb_agent import Agent
 
 import wandb
 from tensorflow.keras.optimizers import Adam
-from pyagents.agents import SAC, OffPolicyAgent
+from pyagents.agents import SAC, PPO, OffPolicyAgent
 from pyagents.memory import Buffer, load_memories
 from pyagents.networks import PolicyNetwork, QNetwork
 from pyagents.networks.network import NetworkOutput, Network
@@ -20,8 +18,15 @@ from pyagents.policies import Policy
 
 
 @gin.configurable
-class SacMod(SAC):
+class PPOMod(PPO):
+    def init(self, envs, *args, **kwargs):
+        if not isinstance(envs, gym.vector.VectorEnv):
+            envs = gym.vector.SyncVectorEnv([lambda: envs])
+        return super().init(envs, *args, **kwargs)
 
+
+@gin.configurable
+class SACMod(SAC):
     def init(self, envs, env_config=None, min_memories=None, actions=None, *args, **kwargs):
         self.num_envs = getattr(envs, "num_envs", 1)
         if self._wandb_run is not None and env_config is not None:
@@ -33,9 +38,9 @@ class SacMod(SAC):
             a_t = envs.action_space.sample()
             s_tp1, r_t, done, info = envs.step(a_t)
             s_tp1 = s_tp1.reshape(1, -1)
-            feasible_action = envs.rescale(info['action'], to_network_range=True).reshape(1, -1)
+            # feasible_action = envs.rescale(info['action'], to_network_range=True).reshape(1, -1)
             self.remember(state=s_t,
-                          action=feasible_action,
+                          action=a_t.reshape(1, -1),
                           reward=np.asarray([r_t]),
                           next_state=s_tp1,
                           done=[done])
@@ -306,9 +311,9 @@ class SACSE(OffPolicyAgent):
             s_tp1, r_t, done, info = envs.step(a_t)
             r_t = np.array([[r_t, info['constraint_violation']]])
             s_tp1 = s_tp1.reshape(1, -1)
-            feasible_action = envs.rescale(info['action'], to_network_range=True).reshape(1, -1)
+            # feasible_action = envs.rescale(info['action'], to_network_range=True).reshape(1, -1)
             self.remember(state=s_t,
-                          action=feasible_action,
+                          action=a_t.reshape(1, -1),
                           reward=r_t,
                           next_state=s_tp1,
                           done=[done])
