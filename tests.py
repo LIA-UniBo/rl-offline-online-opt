@@ -117,7 +117,6 @@ def train_rl_algo(method: str = None,
         agent = SACMod(state_shape, action_shape, buffer='uniform', gamma=discount,
                        actor=a_net, critic=q1_net, critic2=q2_net, reward_normalization=kwargs['reward_normalization'],
                        actor_opt=a_opt, critic1_opt=c1_opt, critic2_opt=c2_opt, alpha_opt=alpha_opt,
-                       target_update_period=1, reward_scaling=1.0,
                        wandb_params=wandb_params, save_dir=log_dir, log_dict=log_dict)
 
     elif algo == 'SACSE':

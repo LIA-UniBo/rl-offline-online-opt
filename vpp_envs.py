@@ -25,7 +25,7 @@ class VPPEnv(Env):
     """
 
     # Reward for unfeasible actions
-    MIN_REWARD = -100
+    MIN_REWARD = -1000
 
     # This is a gym.Env variable that is required by garage for rendering
     metadata = {
@@ -81,6 +81,7 @@ class VPPEnv(Env):
         self.safety_layer = safety_layer
         self.step_reward = step_reward
         self.multidim_reward = multidim_reward
+        self._min_rewards = [self.MIN_REWARD * 0.98**i for i in range(self.n)]
         self._create_instance_variables()
 
     def _create_instance_variables(self):
@@ -1012,7 +1013,7 @@ class MarkovianRlVPPEnv(VPPEnv):
         self.timestep += 1
         assert self.timestep <= self.n, f"Timestep cannot be greater than {self.n}"
         if not feasible and not self.safety_layer:
-            reward = self.MIN_REWARD
+            reward = self._min_rewards[self.timestep - 1]
             done = True
         elif self.step_reward:
             reward = -cost
